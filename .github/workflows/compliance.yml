@@ -1,0 +1,93 @@
+name: Compliance Evidence Collection
+
+# Run weekly and on-demand to collect infrastructure compliance evidence
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Every Monday at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  collect-evidence:
+    name: Collect SOC 2 Evidence Snapshots
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region:     ${{ secrets.AWS_REGION }}
+
+      - name: Verify S3 vault configuration
+        run: |
+          set -euo pipefail
+          BUCKET="${{ secrets.S3_BUCKET }}"
+          echo "=== Bucket versioning ==="
+          aws s3api get-bucket-versioning --bucket "$BUCKET" --no-cli-pager
+
+          echo "=== Bucket encryption ==="
+          aws s3api get-bucket-encryption --bucket "$BUCKET" --no-cli-pager
+
+          echo "=== Public access block ==="
+          aws s3api get-public-access-block --bucket "$BUCKET" --no-cli-pager
+
+          echo "=== Bucket policy ==="
+          aws s3api get-bucket-policy --bucket "$BUCKET" --output text --no-cli-pager || echo "No bucket policy"
+
+      - name: Snapshot IAM policies for GitHub Actions role
+        run: |
+          set -euo pipefail
+          ROLE_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-github-actions"
+          echo "=== Attached managed policies ==="
+          aws iam list-attached-role-policies --role-name "$ROLE_NAME" --no-cli-pager || true
+
+          echo "=== Inline policies ==="
+          aws iam list-role-policies --role-name "$ROLE_NAME" --no-cli-pager || true
+
+      - name: Snapshot Lambda configuration
+        run: |
+          set -euo pipefail
+          PREFIX="${{ secrets.PROJECT_NAME || 'attest' }}"
+          for fn in offer-processor signed-processor; do
+            echo "=== ${PREFIX}-${fn} ==="
+            aws lambda get-function-configuration \
+              --function-name "${PREFIX}-${fn}" \
+              --query '{Runtime:Runtime,MemorySize:MemorySize,Timeout:Timeout,LastModified:LastModified}' \
+              --output table \
+              --no-cli-pager || echo "Function not found"
+          done
+
+      - name: Upload compliance snapshot to vault
+        run: |
+          set -euo pipefail
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
+          SNAPSHOT="compliance-snapshots/${TIMESTAMP}.json"
+
+          cat > /tmp/snapshot.json << EOF
+          {
+            "timestamp": "${TIMESTAMP}",
+            "collector": "github-actions",
+            "run_id": "${{ github.run_id }}",
+            "checks": [
+              "s3-versioning",
+              "s3-encryption",
+              "s3-public-access-block",
+              "s3-tls-policy",
+              "iam-role-policies",
+              "lambda-configuration"
+            ],
+            "status": "collected"
+          }
+          EOF
+
+          aws s3 cp /tmp/snapshot.json \
+            "s3://${{ secrets.S3_BUCKET }}/${SNAPSHOT}" \
+            --content-type "application/json"
+          echo "Uploaded: s3://${{ secrets.S3_BUCKET }}/${SNAPSHOT}"

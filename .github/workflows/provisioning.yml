@@ -1,0 +1,112 @@
+name: Provisioning — Approval-Gated Access Grant
+
+# Triggered by:
+#   1. repository_dispatch from signed_processor Lambda (event_type: nda-signed)
+#   2. manual workflow_dispatch for re-runs / testing
+on:
+  repository_dispatch:
+    types: [nda-signed]
+  workflow_dispatch:
+    inputs:
+      emp_id:
+        description: "Employee ID (e.g. EMP-ABCD1234)"
+        required: true
+        type: string
+
+# OIDC token for AWS + permission to create issues
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  provision:
+    name: Provision Access for ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+    runs-on: ubuntu-latest
+
+    # ─── APPROVAL GATE ───────────────────────────────────────────────────────
+    # The "provisioning" Environment MUST have at least one required reviewer.
+    # Nothing below runs until a Tech Lead clicks "Approve" in the Actions UI.
+    environment: provisioning
+
+    env:
+      EMP_ID: ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region:     ${{ secrets.AWS_REGION }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --quiet pyyaml boto3
+
+      - name: Download employee data from S3
+        run: |
+          set -euo pipefail
+          mkdir -p data/employees/${{ env.EMP_ID }}
+          aws s3 cp \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/employee.json" \
+            "data/employees/${{ env.EMP_ID }}/employee.json"
+          echo "Downloaded employee.json:"
+          cat "data/employees/${{ env.EMP_ID }}/employee.json"
+
+      - name: Run mock provisioning
+        run: |
+          set -euo pipefail
+          python scripts/provision.py "${{ env.EMP_ID }}" \
+            --approver "${{ github.actor }}" \
+            --data-dir "./data"
+
+      - name: Upload evidence to S3
+        run: |
+          set -euo pipefail
+          EMP_DIR="data/employees/${{ env.EMP_ID }}"
+
+          for file in access-granted.csv evidence-index.json; do
+            if [ -f "$EMP_DIR/$file" ]; then
+              aws s3 cp "$EMP_DIR/$file" \
+                "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/$file"
+              echo "Uploaded: $file"
+            fi
+          done
+
+      - name: Create notification issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          EMP_DATA=$(cat "data/employees/${{ env.EMP_ID }}/employee.json")
+          EMP_NAME=$(echo "$EMP_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('name','Unknown'))")
+          ROLE=$(echo "$EMP_DATA" | python3 -c "import sys,json; d=json.load(sys.stdin); print('developer' if d.get('experience_level')=='experienced' else 'fresher')")
+
+          gh issue create \
+            --title "✅ Access Provisioned: ${EMP_NAME} (${{ env.EMP_ID }})" \
+            --body "## Onboarding Complete
+
+          | Field | Value |
+          |-------|-------|
+          | **Employee** | ${EMP_NAME} |
+          | **Employee ID** | ${{ env.EMP_ID }} |
+          | **Role** | ${ROLE} |
+          | **Approved by** | @${{ github.actor }} |
+          | **Provisioned at** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+          | **Run** | [Actions Run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+          ### Evidence
+          - \`access-granted.csv\` uploaded to S3
+          - \`evidence-index.json\` uploaded to S3
+          - Audit trail and signed NDA are in the vault
+
+          > This is a mock provisioning — no real IAM accounts were created." \
+            --label "onboarding,automated"

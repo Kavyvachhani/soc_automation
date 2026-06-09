@@ -1,0 +1,91 @@
+name: Deploy Lambda Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lambda/**"
+  workflow_dispatch:
+
+# Minimum permissions: OIDC token + read code
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ matrix.function }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        function:
+          - offer_processor
+          - signed_processor
+          - approval_handler
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region:     ${{ secrets.AWS_REGION }}
+          # No long-lived keys; session is valid for the job lifetime only.
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: lambda/requirements.txt
+
+      - name: Build Lambda deployment package
+        run: |
+          set -euo pipefail
+          BUILD_DIR="build/${{ matrix.function }}"
+          mkdir -p "$BUILD_DIR"
+
+          # Install Python dependencies into the build directory
+          pip install --quiet \
+            -r lambda/requirements.txt \
+            -t "$BUILD_DIR/"
+
+          # Copy function source + templates
+          cp lambda/${{ matrix.function }}.py "$BUILD_DIR/"
+          cp -r lambda/templates "$BUILD_DIR/"
+
+          # Create the zip (Lambda needs the files at the root)
+          cd "$BUILD_DIR"
+          zip -r "../../${{ matrix.function }}.zip" . -x "*.pyc" -x "__pycache__/*"
+          cd ../..
+
+          echo "Package size: $(du -sh ${{ matrix.function }}.zip | cut -f1)"
+
+      - name: Deploy to AWS Lambda
+        run: |
+          set -euo pipefail
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-${{ matrix.function }}"
+          echo "Deploying to: $FUNCTION_NAME"
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file "fileb://${{ matrix.function }}.zip" \
+            --no-cli-pager
+
+          # Wait for the update to be active before finishing
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          echo "Deploy complete for $FUNCTION_NAME"
+
+      - name: Verify deployment
+        run: |
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-${{ matrix.function }}"
+          aws lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --query 'Configuration.{State:State,LastModified:LastModified,CodeSize:CodeSize}' \
+            --output table \
+            --no-cli-pager
