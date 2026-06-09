@@ -156,11 +156,110 @@ Date: ____________________
 ]
 
 
-def generate_offer_letter(output_path: Path) -> None:
+def generate_offer_letter(
+    name: str,
+    designation: str,
+    team: str,
+    experience_text: str,
+    output_path: Path,
+) -> None:
     today = datetime.date.today().strftime("%B %d, %Y")
+    
+    sections = [
+        (
+            "",
+            f"""\
+Attest Corporation
+123 Innovation Drive, Suite 400
+San Francisco, CA 94105
+
+{today}
+
+{name}
+42 Maple Street
+Bengaluru, Karnataka 560001
+India
+""",
+        ),
+        (
+            "",
+            f"""\
+Dear {name},
+
+We are delighted to extend an offer of employment for the position of {designation}
+in our {team} team at Attest Corporation. This letter confirms the key terms of your offer.
+""",
+        ),
+        (
+            "Position Details",
+            f"""\
+Position:         {designation}
+Team:             {team}
+Department:       Engineering
+Employment Type:  Full-Time
+Start Date:       July 1, 2026
+Reporting To:     Engineering Manager, {team} Team
+Location:         Bengaluru, India (Hybrid — 3 days on-site per week)
+""",
+        ),
+        (
+            "Experience & Level",
+            experience_text,
+        ),
+        (
+            "Compensation",
+            """\
+Base Salary:  INR 24,00,000 per annum (paid monthly)
+Joining Bonus: INR 1,50,000 (paid with first salary, recoverable if you leave within 1 year)
+Annual Bonus:  Up to 15% of base salary (performance-based)
+Stock Options: 800 RSUs vesting over 4 years (25% cliff at 1 year, monthly thereafter)
+""",
+        ),
+        (
+            "Benefits",
+            """\
+- Comprehensive health insurance for employee, spouse, and two children
+- Annual training budget: USD 2,00,0
+- 20 days paid annual leave + 10 sick days + public holidays
+- Internet and home-office equipment allowance: INR 60,000 one-time
+- Employee assistance programme (EAP)
+""",
+        ),
+        (
+            "Conditions of Employment",
+            f"""\
+This offer is contingent upon:
+  1. Successful completion of a background verification check.
+  2. Submission of all required documents before your start date.
+  3. Signing the Non-Disclosure and Confidentiality Agreement.
+  4. Signing the Employee Handbook Acknowledgement.
+
+Please sign and return a copy of this letter to confirm your acceptance no later than
+June 20, 2026. Should you have any questions, please contact hr@attest.io.
+""",
+        ),
+        (
+            "",
+            f"""\
+We are excited to have you join the Attest team and look forward to your contributions.
+
+Sincerely,
+
+John Smith
+Head of Engineering
+Attest Corporation
+john.smith@attest.io | +1-415-555-0100
+
+___________________________
+Accepted by: {name}
+Date: ____________________
+""",
+        ),
+    ]
+
     filled_sections = []
-    for heading, body in OFFER_LETTER_SECTIONS:
-        filled_sections.append((heading, body.replace("{date}", today)))
+    for heading, body in sections:
+        filled_sections.append((heading, body))
 
     pdf_bytes = make_pdf_bytes("OFFER LETTER", filled_sections)
     output_path.write_bytes(pdf_bytes)
@@ -217,8 +316,31 @@ def generate_all(repo_root: Path) -> None:
     sample_dir = repo_root / "sample_data"
     sample_dir.mkdir(exist_ok=True)
 
-    print("\n[seed_data] Generating offer letter...")
-    generate_offer_letter(sample_dir / "offer-letter.pdf")
+    print("\n[seed_data] Generating offer letters...")
+    # 1. DevOps Kavy (Experienced)
+    generate_offer_letter(
+        name="Kavy Vachhani",
+        designation="Senior DevOps Engineer",
+        team="DevOps",
+        experience_text="You are joining as an experienced engineer with over 5 years of experience in distributed systems, cloud computing, and DevOps practices.",
+        output_path=sample_dir / "offer-letter-kavy.pdf",
+    )
+    # 2. Priya Intern (Fresher)
+    generate_offer_letter(
+        name="Priya",
+        designation="Intern",
+        team="Platform",
+        experience_text="You are joining as a fresher intern to gain industry experience.",
+        output_path=sample_dir / "offer-letter-priya.pdf",
+    )
+    # 3. Default Priya Sharma (Experienced - software engineer)
+    generate_offer_letter(
+        name="Priya Sharma",
+        designation="Software Engineer",
+        team="Platform",
+        experience_text="You are joining as an experienced engineer with over 4 years of industry experience.",
+        output_path=sample_dir / "offer-letter.pdf",
+    )
 
     print("\n[seed_data] Generating policy acknowledgement PDFs...")
     policies = [
@@ -255,10 +377,9 @@ def upload_to_s3(repo_root: Path, bucket: str) -> None:
     for md_file in (repo_root / "policies").glob("*.md"):
         uploads.append((md_file, f"policies/{md_file.name}", "text/markdown"))
 
-    # Sample offer letter
-    offer = repo_root / "sample_data" / "offer-letter.pdf"
-    if offer.exists():
-        uploads.append((offer, "sample_data/offer-letter.pdf", "application/pdf"))
+    # Sample offer letters
+    for offer_file in (repo_root / "sample_data").glob("offer-letter*.pdf"):
+        uploads.append((offer_file, f"sample_data/{offer_file.name}", "application/pdf"))
 
     for local_path, s3_key, content_type in uploads:
         s3.upload_file(

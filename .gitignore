@@ -18,3 +18,4 @@ ENV/
 
 # Local data
 data/
+build_lambda/

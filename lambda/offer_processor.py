@@ -42,7 +42,7 @@ def extract_employee_data_ai(text: str) -> dict | None:
             f"Offer letter text:\n{text[:3500]}"
         )
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-3-5-sonnet-latest",
             max_tokens=512,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
@@ -73,9 +73,9 @@ def extract_employee_data_regex(text: str) -> dict:
 
     # Name — look for "Dear <Name>" or "offer to <Name>"
     for pat in [
-        r"Dear\s+((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)",
-        r"offer\s+to\s+((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)",
-        r"congratulate\s+((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)",
+        r"Dear\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*)",
+        r"offer\s+to\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*)",
+        r"congratulate\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*)",
     ]:
         m = re.search(pat, text)
         if m:

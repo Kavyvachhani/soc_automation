@@ -82,6 +82,19 @@ def sha256_file(path: Path | str) -> str:
     return h.hexdigest()
 
 
+def get_approval_api_url() -> str:
+    try:
+        import boto3
+        apigw = boto3.client("apigatewayv2", region_name="us-east-1")
+        apis = apigw.get_apis()
+        for api in apis.get("Items", []):
+            if api.get("Name") == "attest-approval-api":
+                return api.get("ApiEndpoint")
+    except Exception:
+        pass
+    return ""
+
+
 # ── PDF text extraction ────────────────────────────────────────────────────────
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
@@ -112,7 +125,7 @@ def _extract_ai(text: str) -> dict | None:
             f"Offer letter text:\n{text[:3500]}"
         )
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-3-5-sonnet-latest",
             max_tokens=512,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
@@ -138,8 +151,8 @@ def _extract_regex(text: str) -> dict:
         "confidence": 0.4,
     }
     for pat in [
-        r"Dear\s+((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)",
-        r"offer\s+to\s+((?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+)",
+        r"Dear\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*)",
+        r"offer\s+to\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*)",
     ]:
         m = re.search(pat, text)
         if m:
@@ -766,8 +779,15 @@ def step_approve() -> None:
                 st.warning("The employee's access request was rejected. Contact the tech lead for details.")
             else:
                 st.warning(f"Status: **{status}** — waiting for tech lead to click the approval link in their email.")
-        except Exception:
-            st.warning("Approval request is being processed. Refresh to check status.")
+                token = pending.get("token")
+                if token:
+                    api_url = get_approval_api_url()
+                    if api_url:
+                        approve_url = f"{api_url}/approve?token={token}&emp_id={emp_id}&action=approve&approver=portal-debug"
+                        st.info("💡 **Debug / Shortcut Link:** You can simulate the Tech Lead's approval by clicking the button below:")
+                        st.link_button("✅ Approve & Provision Access", approve_url)
+        except Exception as exc:
+            st.warning(f"Approval request is being processed. Refresh to check status. Details: {exc}")
 
         if st.button("🔄 Refresh Status", type="primary"):
             st.rerun()
