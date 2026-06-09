@@ -425,6 +425,92 @@ def process_signing_mock(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_sidebar() -> None:
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+        
+        /* Apply Outfit Font globally */
+        html, body, [class*="css"], .stMarkdown, .stText, p, span, label {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        }
+        
+        /* Main background */
+        .main {
+            background-color: #0a0b10 !important;
+            background-image: 
+                radial-gradient(circle at 80% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 50%),
+                radial-gradient(circle at 10% 90%, rgba(59, 130, 246, 0.08) 0%, transparent 50%) !important;
+        }
+        
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: #0f1016 !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        /* Glassmorphism Cards */
+        div.stAlert, div.element-container:has(div.stCard), .stDeployInfo {
+            background: rgba(20, 22, 34, 0.6) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.07) !important;
+            border-radius: 14px !important;
+            padding: 18px !important;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2) !important;
+            margin-bottom: 15px !important;
+        }
+        
+        /* Custom buttons styling */
+        .stButton>button {
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 8px 20px !important;
+            font-weight: 600 !important;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3) !important;
+            transition: all 0.25s ease !important;
+        }
+        .stButton>button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5) !important;
+            background: linear-gradient(135deg, #4338ca 0%, #2563eb 100%) !important;
+            color: #ffffff !important;
+        }
+        .stButton>button:active {
+            transform: translateY(0) !important;
+        }
+        
+        /* Headings customization */
+        h1, h2, h3, h4, h5, h6 {
+            color: #ffffff !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em !important;
+        }
+        
+        /* Badge decoration styling */
+        .custom-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 10px;
+            border: 1px solid;
+        }
+        .badge-fresher {
+            background: rgba(56, 189, 248, 0.1) !important;
+            color: #38bdf8 !important;
+            border-color: rgba(56, 189, 248, 0.2) !important;
+        }
+        .badge-experienced {
+            background: rgba(168, 85, 247, 0.1) !important;
+            color: #a855f7 !important;
+            border-color: rgba(168, 85, 247, 0.2) !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     with st.sidebar:
         st.title("🛡️ Attest")
         st.caption("SOC 2 Onboarding Evidence Platform")
@@ -603,8 +689,18 @@ def step_sign() -> None:
             )
 
     st.divider()
-    st.subheader("✍️ Electronic Signature")
+    st.subheader("📷 Photo Verification")
+    st.write("🔒 **SOC 2 Security Compliance**: Please capture a live photo verification using your webcam:")
+    photo = st.camera_input("📸 Capture Photo Verification", label_visibility="collapsed")
+    
+    photo_file = None
+    if photo is None:
+        st.caption("No working webcam? Upload a photo instead:")
+        photo_file = st.file_uploader("Upload Verification Photo", type=["png", "jpg", "jpeg"])
+        
+    captured_photo = photo or photo_file
 
+    st.subheader("✍️ Electronic Signature")
     consent = st.checkbox(
         "I have carefully read and understood this Non-Disclosure Agreement. "
         "I consent to sign electronically. I acknowledge that my electronic signature "
@@ -617,23 +713,32 @@ def step_sign() -> None:
         key="sig_name",
     )
 
-    ready = consent and signature_name.strip()
+    ready = consent and signature_name.strip() and captured_photo is not None
 
     if not consent:
-        st.info("Please read and accept the NDA above to enable the signature field.")
-
+        st.info("Please read and accept the NDA above and check the consent box to enable the signature field.")
+    
     if consent and not signature_name.strip():
         st.info("Type your full legal name to proceed.")
+        
+    if consent and signature_name.strip() and captured_photo is None:
+        st.info("Capture a photo using your webcam or upload a photo to enable the submit button.")
 
     if ready:
         if st.button("✅ Sign NDA & Submit", type="primary"):
             with st.spinner("Capturing audit trail and generating signed NDA…"):
                 try:
                     nda_pdf_path_obj = Path(nda_pdf_path)
+                    photo_bytes = captured_photo.getvalue()
+                    emp_id = st.session_state.emp_id
 
                     if MOCK_MODE:
+                        # Save photo locally
+                        d = get_emp_dir(emp_id)
+                        (d / "photo.jpg").write_bytes(photo_bytes)
+
                         audit_trail, signed_path = process_signing_mock(
-                            st.session_state.emp_id,
+                            emp_id,
                             nda_text,
                             nda_pdf_path_obj,
                             signature_name.strip(),
@@ -641,7 +746,15 @@ def step_sign() -> None:
                     else:
                         import boto3
                         s3 = boto3.client("s3")
-                        emp_id = st.session_state.emp_id
+                        
+                        # Upload photo to S3
+                        s3.put_object(
+                            Bucket=BUCKET_NAME,
+                            Key=f"employees/{emp_id}/photo.jpg",
+                            Body=photo_bytes,
+                            ContentType="image/jpeg",
+                        )
+
                         hash_before = sha256_file(nda_pdf_path_obj)
                         audit_trail = {
                             "emp_id": emp_id,
@@ -842,7 +955,10 @@ def step_done() -> None:
             "nda-unsigned.pdf":       ("Unsigned NDA",              "application/pdf"),
             "signed-nda.pdf":         ("Signed NDA",                "application/pdf"),
             "nda-audit-trail.json":   ("E-Signature Audit Trail",   "application/json"),
+            "photo.jpg":              ("Verification Photo (JPG)",  "image/jpeg"),
             "access-granted.csv":     ("Access Grant Record (CSV)", "text/csv"),
+            "aws-access-credentials.csv": ("AWS Credentials (CSV)", "text/csv"),
+            "onboarding-report.pdf":  ("Compliance Report (PDF)",   "application/pdf"),
             "evidence-index.json":    ("Evidence Index",            "application/json"),
         }
         cols = st.columns(3)
@@ -870,7 +986,10 @@ def step_done() -> None:
             "nda-unsigned.pdf":       ("Unsigned NDA",              "application/pdf"),
             "signed-nda.pdf":         ("Signed NDA",                "application/pdf"),
             "nda-audit-trail.json":   ("E-Signature Audit Trail",   "application/json"),
+            "photo.jpg":              ("Verification Photo (JPG)",  "image/jpeg"),
             "access-granted.csv":     ("Access Grant Record (CSV)", "text/csv"),
+            "aws-access-credentials.csv": ("AWS Credentials (CSV)", "text/csv"),
+            "onboarding-report.pdf":  ("Compliance Report (PDF)",   "application/pdf"),
             "evidence-index.json":    ("Evidence Index",            "application/json"),
         }
         cols = st.columns(3)

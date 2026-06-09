@@ -36,7 +36,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials (via Access Keys)
+        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Configure AWS credentials (via OIDC Role)
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -49,37 +58,36 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install --quiet pyyaml boto3
+        run: pip install --quiet pyyaml boto3 fpdf2
 
       - name: Download employee data from S3
         run: |
           set -euo pipefail
           mkdir -p data/employees/${{ env.EMP_ID }}
-          aws s3 cp \
-            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/employee.json" \
-            "data/employees/${{ env.EMP_ID }}/employee.json"
-          echo "Downloaded employee.json:"
-          cat "data/employees/${{ env.EMP_ID }}/employee.json"
+          aws s3 sync \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/" \
+            "data/employees/${{ env.EMP_ID }}/"
+          echo "Downloaded employee folder contents:"
+          ls -la "data/employees/${{ env.EMP_ID }}/"
 
-      - name: Run mock provisioning
+      - name: Run provisioning
         run: |
           set -euo pipefail
+          REAL_FLAG=""
+          if [ "${{ secrets.ENABLE_REAL_PROVISIONING || 'true' }}" = "true" ]; then
+            REAL_FLAG="--real"
+          fi
           python scripts/provision.py "${{ env.EMP_ID }}" \
             --approver "${{ github.actor }}" \
-            --data-dir "./data"
+            --data-dir "./data" \
+            $REAL_FLAG
 
       - name: Upload evidence to S3
         run: |
           set -euo pipefail
-          EMP_DIR="data/employees/${{ env.EMP_ID }}"
-
-          for file in access-granted.csv evidence-index.json; do
-            if [ -f "$EMP_DIR/$file" ]; then
-              aws s3 cp "$EMP_DIR/$file" \
-                "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/$file"
-              echo "Uploaded: $file"
-            fi
-          done
+          aws s3 sync \
+            "data/employees/${{ env.EMP_ID }}/" \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/"
 
       - name: Create notification issue
         env:

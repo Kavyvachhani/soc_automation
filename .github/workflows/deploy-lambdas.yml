@@ -28,12 +28,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials (via Access Keys)
+        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Configure AWS credentials (via OIDC Role)
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
-          # No long-lived keys; session is valid for the job lifetime only.
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
