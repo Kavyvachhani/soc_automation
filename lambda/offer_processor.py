@@ -191,8 +191,25 @@ def fill_nda_template(employee_data: dict, emp_id: str) -> str:
 # ─── PDF rendering ────────────────────────────────────────────────────────────
 
 def _safe(s: str) -> str:
-    """Encode to latin-1 safely for fpdf core fonts."""
-    return str(s).encode("latin-1", errors="replace").decode("latin-1")
+    """Encode string to latin-1 safely for fpdf core fonts.
+    Characters outside latin-1 range are replaced with ASCII equivalents or '?'.
+    """
+    # Common unicode replacements for readability
+    replacements = {
+        '\u2019': "'",   # right single quotation mark
+        '\u2018': "'",   # left single quotation mark
+        '\u201c': '"',   # left double quotation mark
+        '\u201d': '"',   # right double quotation mark
+        '\u2013': '-',   # en dash
+        '\u2014': '--',  # em dash
+        '\u2022': '*',   # bullet
+        '\u2026': '...', # ellipsis
+        '\u00a0': ' ',   # non-breaking space
+    }
+    s = str(s)
+    for orig, repl in replacements.items():
+        s = s.replace(orig, repl)
+    return s.encode("latin-1", errors="replace").decode("latin-1")
 
 
 def render_nda_pdf(nda_text: str) -> bytes:

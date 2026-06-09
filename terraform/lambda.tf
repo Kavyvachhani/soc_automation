@@ -208,6 +208,9 @@ resource "aws_lambda_function" "approval_handler" {
       READONLY_POLICY_ARN     = var.readonly_policy_arn
       DEVELOPER_POLICY_ARN    = var.developer_policy_arn
       PORTAL_URL              = var.portal_url
+      GITHUB_TOKEN            = var.github_token
+      GITHUB_ORG              = var.github_org
+      GITHUB_REPO             = var.github_repo
     }
   }
 

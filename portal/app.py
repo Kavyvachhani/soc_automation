@@ -53,6 +53,11 @@ _DEFAULTS = {
     "signed_nda_path": None,
     "audit_trail": None,
     "evidence": None,
+    # Policy acknowledgement tracking
+    "policy_sigs": {},          # {policy_id: {"signed_at": ..., "sig_name": ...}}
+    "policy_signed_paths": {},  # {policy_id: local path}
+    # Live-mode upload state
+    "_waiting_for_lambda": False,
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
@@ -64,8 +69,24 @@ for _k, _v in _DEFAULTS.items():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe(s: str) -> str:
-    """Encode string to latin-1 safely for fpdf core fonts."""
-    return str(s).encode("latin-1", errors="replace").decode("latin-1")
+    """Encode string to latin-1 safely for fpdf core fonts.
+    Replaces common unicode punctuation with ASCII equivalents before encoding.
+    """
+    replacements = {
+        '\u2019': "'",    # right single quotation mark
+        '\u2018': "'",    # left single quotation mark
+        '\u201c': '"',    # left double quotation mark
+        '\u201d': '"',    # right double quotation mark
+        '\u2013': '-',    # en dash
+        '\u2014': '--',   # em dash
+        '\u2022': '*',    # bullet
+        '\u2026': '...',  # ellipsis
+        '\u00a0': ' ',    # non-breaking space
+    }
+    s = str(s)
+    for orig, repl in replacements.items():
+        s = s.replace(orig, repl)
+    return s.encode("latin-1", errors="replace").decode("latin-1")
 
 
 def get_emp_dir(emp_id: str) -> Path:
@@ -553,7 +574,7 @@ def render_sidebar() -> None:
 
         steps = [
             ("upload",  "Upload Offer Letter"),
-            ("sign",    "Sign NDA"),
+            ("sign",    "Sign NDA & Policies"),
             ("approve", "Tech Lead Approval"),
             ("done",    "Evidence Collected"),
         ]
@@ -596,6 +617,39 @@ def step_upload() -> None:
         "The system will extract their data and auto-generate a personalised NDA."
     )
 
+    # ── Live mode: show check-status widget if waiting for Lambda ─────────────
+    if not MOCK_MODE and st.session_state.get("_waiting_for_lambda") and st.session_state.emp_id:
+        emp_id = st.session_state.emp_id
+        st.info(
+            f"⏳ Processing offer letter for `{emp_id}` …\n\n"
+            "The Lambda function is extracting employee data and generating the NDA. "
+            "This usually takes 20–40 seconds."
+        )
+        if st.button("🔄 Check Status", type="primary"):
+            try:
+                import boto3
+                s3 = boto3.client("s3")
+                r = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/employee.json")
+                data = json.loads(r["Body"].read())
+                r2 = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/nda-content.txt")
+                nda_text = r2["Body"].read().decode()
+                tmp = Path(f"/tmp/{emp_id}")
+                tmp.mkdir(exist_ok=True)
+                r3 = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/nda-unsigned.pdf")
+                nda_pdf_path = tmp / "nda-unsigned.pdf"
+                nda_pdf_path.write_bytes(r3["Body"].read())
+
+                st.session_state.employee_data = data
+                st.session_state.nda_text = nda_text
+                st.session_state.nda_pdf_path = str(nda_pdf_path)
+                st.session_state._waiting_for_lambda = False
+                st.session_state.step = "sign"
+                st.rerun()
+            except Exception:
+                st.warning("Not ready yet — Lambda is still processing. Try again in a few seconds.")
+        st.stop()
+        return
+
     # Quick tip: use the pre-generated sample
     sample = REPO_ROOT / "sample_data" / "offer-letter.pdf"
     if sample.exists():
@@ -632,37 +686,25 @@ def step_upload() -> None:
                     if MOCK_MODE:
                         data, nda_text, nda_pdf_path = process_offer_letter_mock(pdf_bytes, emp_id)
                     else:
-                        # Real mode: push to S3 and trigger GitHub workflow
-                        import boto3, time
+                        # Real mode: push to S3 and trigger Lambda via GitHub workflow
+                        import boto3
                         s3 = boto3.client("s3")
                         s3.put_object(
                             Bucket=BUCKET_NAME,
                             Key=f"employees/{emp_id}/offer-letter.pdf",
                             Body=pdf_bytes,
                         )
-                        st.info("Offer letter uploaded to vault. Triggering processing workflow in GitHub Actions…")
+                        st.info(
+                            f"✅ Offer letter uploaded to vault (`{emp_id}`).\n\n"
+                            "GitHub Actions workflow triggered — Lambda is extracting data and generating the NDA.\n\n"
+                            "Click **Check Status** after ~30 seconds."
+                        )
+                        # Store emp_id so the check-status widget can poll
+                        st.session_state.emp_id = emp_id
+                        st.session_state._waiting_for_lambda = True
                         dispatch_to_github(emp_id, "offer-uploaded")
-                        st.info("Waiting for workflow to complete & NDA to generate…")
-                        nda_pdf_path = None
-                        for _ in range(30):
-                            time.sleep(2)
-                            try:
-                                r = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/employee.json")
-                                data = json.loads(r["Body"].read())
-                                r2 = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/nda-content.txt")
-                                nda_text = r2["Body"].read().decode()
-                                # Download NDA PDF locally for display
-                                tmp = Path(f"/tmp/{emp_id}")
-                                tmp.mkdir(exist_ok=True)
-                                r3 = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/nda-unsigned.pdf")
-                                nda_pdf_path = tmp / "nda-unsigned.pdf"
-                                nda_pdf_path.write_bytes(r3["Body"].read())
-                                break
-                            except Exception:
-                                continue
-                        if nda_pdf_path is None:
-                            st.error("Lambda processing timed out. Check CloudWatch logs.")
-                            return
+                        st.rerun()
+                        return  # exit — polling handled below
 
                     st.session_state.emp_id = emp_id
                     st.session_state.employee_data = data
@@ -677,11 +719,257 @@ def step_upload() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# UI — Step 2: Sign NDA
+# Policy helpers — render and sign policy acknowledgement PDFs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+POLICIES = [
+    {
+        "id":    "nda",
+        "label": "Non-Disclosure Agreement (NDA)",
+        "file":  None,   # uses nda_text from session state
+        "icon":  "🔐",
+    },
+    {
+        "id":    "security",
+        "label": "Information Security Policy",
+        "file":  "security_policy.md",
+        "icon":  "🔒",
+    },
+    {
+        "id":    "handbook",
+        "label": "Employee Handbook",
+        "file":  "employee_handbook.md",
+        "icon":  "📖",
+    },
+    {
+        "id":    "acceptable_use",
+        "label": "Acceptable Use Policy",
+        "file":  "acceptable_use.md",
+        "icon":  "💻",
+    },
+]
+
+
+def load_policy_text(policy: dict, nda_text: str | None = None) -> str:
+    """Load the full text for a policy."""
+    if policy["id"] == "nda":
+        return nda_text or "NDA text not available."
+    fpath = POLICIES_DIR / policy["file"]
+    if fpath.exists():
+        return fpath.read_text()
+    return f"Policy document '{policy['file']}' not found in policies directory."
+
+
+def render_policy_ack_pdf(
+    policy_label: str,
+    policy_text: str,
+    signature_name: str,
+    audit_trail: dict,
+    output_path: Path,
+) -> None:
+    """Render a policy acknowledgement PDF with signature block."""
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(0, 12, text=_safe(policy_label.upper()), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.cell(0, 6, text=_safe("[ELECTRONICALLY ACKNOWLEDGED]"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+
+    # Policy body
+    pdf.set_font("Helvetica", size=9)
+    for line in policy_text.split("\n"):
+        stripped = line.strip()
+        # Markdown heading detection
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.cell(0, 9, text=_safe(stripped[2:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", size=9)
+        elif stripped.startswith("## "):
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 8, text=_safe(stripped[3:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", size=9)
+        elif stripped.startswith("### "):
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(0, 7, text=_safe(stripped[4:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", size=9)
+        elif stripped.startswith("---"):
+            pdf.set_draw_color(200, 200, 200)
+            pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+            pdf.ln(3)
+        elif stripped.startswith("| ") and "|" in stripped[2:]:
+            # Render table rows as plain text
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            row_text = "  |  ".join(cells)
+            pdf.set_font("Courier", size=8)
+            pdf.multi_cell(0, 5, text=_safe(row_text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", size=9)
+        elif stripped == "":
+            pdf.ln(3)
+        else:
+            # Strip markdown bold/italic markers for clean output
+            clean = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', stripped)
+            clean = re.sub(r'_{1,2}([^_]+)_{1,2}', r'\1', clean)
+            pdf.multi_cell(0, 5, text=_safe(clean), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # Signature block
+    pdf.ln(8)
+    pdf.set_draw_color(100, 100, 100)
+    pdf.set_line_width(0.5)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, text=_safe("ACKNOWLEDGEMENT & ELECTRONIC SIGNATURE"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", size=9)
+
+    sig_rows = [
+        ("Policy",              policy_label),
+        ("Signer Name",         audit_trail.get("signer_name", "")),
+        ("Signed At (UTC)",     audit_trail.get("timestamp_utc", "")),
+        ("Signature Method",    "Typed Legal Name (Electronic Consent)"),
+        ("Consent Statement",   "I have read, understood, and agree to comply with this policy."),
+    ]
+    for label, value in sig_rows:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(50, 6, text=_safe(f"{label}:"))
+        pdf.set_font("Helvetica", size=9)
+        pdf.multi_cell(0, 6, text=_safe(str(value)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.output(str(output_path))
+
+
+def generate_combined_evidence_pdf(
+    emp_id: str,
+    employee_data: dict,
+    audit_trail: dict,
+    policy_sigs: dict,
+    photo_path: Path | None,
+    output_path: Path,
+) -> None:
+    """Generate a single combined PDF containing all evidence: photo, NDA, policies, credentials info."""
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    # ── Cover page ──
+    pdf.add_page()
+    pdf.set_fill_color(15, 23, 42)
+    pdf.rect(0, 0, 210, 297, "F")
+
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_y(80)
+    pdf.cell(0, 14, text="SOC 2 ONBOARDING", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 14, text="EVIDENCE BUNDLE", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(10)
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 8, text=_safe(f"Employee: {employee_data.get('name', 'Unknown')}"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 8, text=_safe(f"Employee ID: {emp_id}"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 8, text=_safe(f"Generated: {datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "I", 10)
+    pdf.ln(20)
+    pdf.cell(0, 6, text="Confidential — SOC 2 Compliance Evidence", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ── Employee info + selfie page ──
+    pdf.add_page()
+    pdf.set_text_color(33, 37, 41)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, text="Section 1: Employee Verification", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+
+    y_info = pdf.get_y()
+    # Photo on right
+    if photo_path and photo_path.exists():
+        try:
+            pdf.image(str(photo_path), x=140, y=y_info, w=45, h=45)
+        except Exception as e:
+            print(f"[evidence-pdf] Could not embed photo: {e}")
+
+    pdf.set_font("Helvetica", size=10)
+    info_rows = [
+        ("Full Name",          employee_data.get("name", "Unknown")),
+        ("Employee ID",        emp_id),
+        ("Designation",        employee_data.get("designation", "Employee")),
+        ("Team",               employee_data.get("team", "Engineering")),
+        ("Employment Type",    employee_data.get("employment_type", "full-time")),
+        ("Experience Level",   employee_data.get("experience_level", "fresher").capitalize()),
+        ("Start Date",         employee_data.get("start_date", "TBD")),
+        ("Photo Captured",     "Yes" if (photo_path and photo_path.exists()) else "Not captured"),
+    ]
+    for label, value in info_rows:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(45, 6, text=_safe(f"{label}:"))
+        pdf.set_font("Helvetica", size=9)
+        pdf.cell(80, 6, text=_safe(str(value)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    if photo_path and photo_path.exists():
+        pdf.set_y(max(pdf.get_y(), y_info + 50))
+
+    # ── Signature audit trail ──
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 9, text="NDA Signature Audit Trail", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", size=9)
+    trail_rows = [
+        ("Signer Name",         audit_trail.get("signer_name", "")),
+        ("Signed At (UTC)",     audit_trail.get("timestamp_utc", "")),
+        ("IP Address",          audit_trail.get("source_ip", "")),
+        ("Consent Given",       "Yes" if audit_trail.get("consent") else "No"),
+        ("Signature Method",    "Typed Legal Name"),
+        ("Doc Hash (pre-sign)", str(audit_trail.get("document_hash_before", ""))[:48]),
+        ("Doc Hash (post-sign)", str(audit_trail.get("document_hash_after", ""))[:48]),
+    ]
+    for label, value in trail_rows:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(50, 5, text=_safe(f"{label}:"))
+        pdf.set_font("Courier", size=8)
+        pdf.multi_cell(0, 5, text=_safe(str(value)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ── Policy acknowledgements summary ──
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, text="Section 2: Policy Acknowledgements", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(241, 245, 249)
+    pdf.cell(70, 7, "Policy", border=1, fill=True)
+    pdf.cell(45, 7, "Signed At (UTC)", border=1, fill=True)
+    pdf.cell(55, 7, "Signer Name", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.set_font("Helvetica", size=8)
+    for p in POLICIES:
+        sig = policy_sigs.get(p["id"], {})
+        signed_at = sig.get("signed_at", "NOT SIGNED")
+        sig_name = sig.get("sig_name", "—")
+        row_fill = (255, 255, 255) if sig else (254, 226, 226)
+        pdf.set_fill_color(*row_fill)
+        pdf.cell(70, 7, _safe(p["label"]), border=1, fill=True)
+        pdf.cell(45, 7, _safe(signed_at[:19] if len(signed_at) > 19 else signed_at), border=1, fill=True)
+        pdf.cell(55, 7, _safe(sig_name), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.output(str(output_path))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UI — Step 2: Sign NDA & all policies
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def step_sign() -> None:
-    st.header("Step 2 — Review & Sign NDA")
+    st.header("Step 2 — Review & Sign NDA + Policies")
 
     data = st.session_state.employee_data or {}
     col1, col2, col3, col4 = st.columns(4)
@@ -704,133 +992,272 @@ def step_sign() -> None:
     else:
         st.success(f"Extraction confidence: **{conf:.0%}** (AI extraction).")
 
-    st.subheader("Non-Disclosure Agreement")
+    emp_id = st.session_state.emp_id
     nda_text = st.session_state.nda_text or ""
-    with st.expander("📄 Read Full NDA (required before signing)", expanded=True):
-        st.text_area(
-            "NDA",
-            nda_text,
-            height=450,
-            disabled=True,
-            label_visibility="collapsed",
+    nda_pdf_path = st.session_state.nda_pdf_path
+
+    # ── Photo Verification (required once for all) ───────────────────────────
+    st.divider()
+    st.subheader("📷 Live Photo Verification (Required)")
+    st.caption(
+        "SOC 2 requirement: capture a live selfie to verify your identity before signing. "
+        "This photo will be embedded in your compliance evidence bundle."
+    )
+
+    col_cam, col_upload = st.columns([3, 1])
+    with col_cam:
+        photo = st.camera_input("📸 Capture live photo", label_visibility="visible", key="webcam_photo")
+    with col_upload:
+        st.caption("No webcam?")
+        photo_upload = st.file_uploader(
+            "Upload photo",
+            type=["png", "jpg", "jpeg"],
+            key="photo_upload",
+            label_visibility="visible",
         )
 
-    nda_pdf_path = st.session_state.nda_pdf_path
-    if nda_pdf_path and Path(nda_pdf_path).exists():
-        with open(nda_pdf_path, "rb") as fh:
-            st.download_button(
-                "📥 Download NDA PDF",
-                fh,
-                file_name="nda-unsigned.pdf",
-                mime="application/pdf",
+    captured_photo = photo or photo_upload
+    photo_ok = captured_photo is not None
+
+    if not photo_ok:
+        st.info("Capture or upload a photo to enable signing.")
+
+    # ── Policy tabs — each policy must be signed individually ────────────────
+    st.divider()
+    st.subheader("📋 Review & Sign All Required Documents")
+    st.info(
+        "You must read and sign **all 4 documents** before proceeding. "
+        "Each document requires your typed name as an electronic signature."
+    )
+
+    policy_sigs: dict = st.session_state.policy_sigs or {}
+    policy_signed_paths: dict = st.session_state.policy_signed_paths or {}
+
+    tabs = st.tabs([f"{p['icon']} {p['label']}" for p in POLICIES])
+
+    for tab, policy in zip(tabs, POLICIES):
+        with tab:
+            pid = policy["id"]
+            p_text = load_policy_text(policy, nda_text)
+            already_signed = pid in policy_sigs
+
+            if already_signed:
+                sig_info = policy_sigs[pid]
+                st.success(
+                    f"✅ Signed by **{sig_info['sig_name']}** "
+                    f"at {sig_info['signed_at'][:19]} UTC"
+                )
+                # Download signed copy
+                signed_p = policy_signed_paths.get(pid)
+                if signed_p and Path(signed_p).exists():
+                    with open(signed_p, "rb") as fh:
+                        st.download_button(
+                            f"📥 Download Signed {policy['label']}",
+                            fh,
+                            file_name=f"signed-{pid}.pdf",
+                            mime="application/pdf",
+                            key=f"dl_{pid}",
+                        )
+                continue
+
+            # Show policy text
+            with st.expander(f"📄 Read {policy['label']} (required before signing)", expanded=False):
+                st.text_area(
+                    policy["label"],
+                    p_text,
+                    height=400,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key=f"text_{pid}",
+                )
+
+            # Download unsigned PDF if NDA
+            if pid == "nda" and nda_pdf_path and Path(nda_pdf_path).exists():
+                with open(nda_pdf_path, "rb") as fh:
+                    st.download_button(
+                        "📥 Download NDA PDF (unsigned)",
+                        fh,
+                        file_name="nda-unsigned.pdf",
+                        mime="application/pdf",
+                        key=f"dl_unsigned_{pid}",
+                    )
+
+            consent = st.checkbox(
+                f"I have read and understood the **{policy['label']}** and agree to its terms. "
+                "I consent to sign electronically.",
+                key=f"consent_{pid}",
+            )
+            sig_name = st.text_input(
+                "Type your full legal name as your signature:",
+                placeholder="e.g. Priya Sharma",
+                key=f"sig_{pid}",
             )
 
-    st.divider()
-    st.subheader("📷 Photo Verification")
-    st.write("🔒 **SOC 2 Security Compliance**: Please capture a live photo verification using your webcam:")
-    photo = st.camera_input("📸 Capture Photo Verification", label_visibility="collapsed")
-    
-    photo_file = None
-    if photo is None:
-        st.caption("No working webcam? Upload a photo instead:")
-        photo_file = st.file_uploader("Upload Verification Photo", type=["png", "jpg", "jpeg"])
-        
-    captured_photo = photo or photo_file
+            can_sign = consent and sig_name.strip() and photo_ok
+            if not photo_ok:
+                st.warning("Capture your photo above first.")
+            elif not consent:
+                st.info("Check the consent box to enable signing.")
+            elif not sig_name.strip():
+                st.info("Type your full legal name to sign.")
 
-    st.subheader("✍️ Electronic Signature")
-    consent = st.checkbox(
-        "I have carefully read and understood this Non-Disclosure Agreement. "
-        "I consent to sign electronically. I acknowledge that my electronic signature "
-        "is legally binding and has the same effect as a handwritten signature.",
-        key="nda_consent",
-    )
-    signature_name = st.text_input(
-        "Type your **full legal name** as your signature:",
-        placeholder="e.g. Priya Sharma",
-        key="sig_name",
-    )
-
-    ready = consent and signature_name.strip() and captured_photo is not None
-
-    if not consent:
-        st.info("Please read and accept the NDA above and check the consent box to enable the signature field.")
-    
-    if consent and not signature_name.strip():
-        st.info("Type your full legal name to proceed.")
-        
-    if consent and signature_name.strip() and captured_photo is None:
-        st.info("Capture a photo using your webcam or upload a photo to enable the submit button.")
-
-    if ready:
-        if st.button("✅ Sign NDA & Submit", type="primary"):
-            with st.spinner("Capturing audit trail and generating signed NDA…"):
-                try:
-                    nda_pdf_path_obj = Path(nda_pdf_path)
-                    photo_bytes = captured_photo.getvalue()
-                    emp_id = st.session_state.emp_id
-
-                    if MOCK_MODE:
-                        # Save photo locally
+            if can_sign and st.button(
+                f"✍️ Sign {policy['label']}",
+                type="primary",
+                key=f"sign_btn_{pid}",
+            ):
+                with st.spinner(f"Signing {policy['label']}…"):
+                    try:
                         d = get_emp_dir(emp_id)
-                        (d / "photo.jpg").write_bytes(photo_bytes)
+                        now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-                        audit_trail, signed_path = process_signing_mock(
-                            emp_id,
-                            nda_text,
-                            nda_pdf_path_obj,
-                            signature_name.strip(),
-                        )
-                    else:
-                        import boto3
-                        s3 = boto3.client("s3")
-                        
-                        # Upload photo to S3
-                        s3.put_object(
-                            Bucket=BUCKET_NAME,
-                            Key=f"employees/{emp_id}/photo.jpg",
-                            Body=photo_bytes,
-                            ContentType="image/jpeg",
-                        )
-
-                        hash_before = sha256_file(nda_pdf_path_obj)
-                        audit_trail = {
+                        p_audit = {
                             "emp_id": emp_id,
-                            "signer_name": signature_name.strip(),
-                            "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            "policy_id": pid,
+                            "policy_label": policy["label"],
+                            "signer_name": sig_name.strip(),
+                            "timestamp_utc": now_ts,
                             "source_ip": get_client_ip(),
-                            "user_agent": "Attest-Streamlit-Portal/1.0",
                             "consent": True,
                             "signature_method": "typed-name",
-                            "document_hash_before": hash_before,
-                            "document_hash_after": None,
                         }
-                        tmp = Path(f"/tmp/{emp_id}")
-                        tmp.mkdir(exist_ok=True)
-                        signed_path = tmp / "signed-nda.pdf"
-                        render_signed_nda_pdf(nda_text, signature_name.strip(), audit_trail, signed_path)
-                        audit_trail["document_hash_after"] = sha256_file(signed_path)
 
-                        s3.put_object(
-                            Bucket=BUCKET_NAME,
-                            Key=f"employees/{emp_id}/nda-audit-trail.json",
-                            Body=json.dumps(audit_trail, indent=2).encode(),
-                            ContentType="application/json",
-                        )
-                        s3.put_object(
-                            Bucket=BUCKET_NAME,
-                            Key=f"employees/{emp_id}/signed-nda.pdf",
-                            Body=signed_path.read_bytes(),
-                            ContentType="application/pdf",
+                        out_path = d / f"signed-{pid}.pdf"
+                        render_policy_ack_pdf(
+                            policy_label=policy["label"],
+                            policy_text=p_text,
+                            signature_name=sig_name.strip(),
+                            audit_trail=p_audit,
+                            output_path=out_path,
                         )
 
-                    st.session_state.audit_trail = audit_trail
-                    st.session_state.signed_nda_path = str(signed_path)
-                    st.session_state.step = "approve"
-                    st.rerun()
+                        # Upload to S3 in live mode
+                        if not MOCK_MODE:
+                            import boto3
+                            s3 = boto3.client("s3")
+                            s3.put_object(
+                                Bucket=BUCKET_NAME,
+                                Key=f"employees/{emp_id}/signed-{pid}.pdf",
+                                Body=out_path.read_bytes(),
+                                ContentType="application/pdf",
+                            )
 
-                except Exception as exc:
-                    st.error(f"Signing failed: {exc}")
-                    st.exception(exc)
+                        policy_sigs[pid] = {
+                            "signed_at": now_ts,
+                            "sig_name": sig_name.strip(),
+                        }
+                        policy_signed_paths[pid] = str(out_path)
+                        st.session_state.policy_sigs = policy_sigs
+                        st.session_state.policy_signed_paths = policy_signed_paths
+                        st.success(f"✅ {policy['label']} signed!")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Signing failed: {exc}")
+                        st.exception(exc)
+
+    # ── Check all policies signed ─────────────────────────────────────────────
+    all_policy_ids = {p["id"] for p in POLICIES}
+    signed_ids = set(policy_sigs.keys())
+    remaining = all_policy_ids - signed_ids
+
+    st.divider()
+    if remaining:
+        still_needed = [p["label"] for p in POLICIES if p["id"] in remaining]
+        st.warning(f"Still needs signing: **{', '.join(still_needed)}**")
+    else:
+        st.success("✅ All documents signed! You can now proceed.")
+
+        if st.button("✅ Submit All Signatures & Proceed to Approval", type="primary"):
+            # The NDA is the primary document — save it as signed-nda.pdf
+            signed_nda = policy_signed_paths.get("nda")
+            if not signed_nda:
+                st.error("Signed NDA path not found. Please re-sign the NDA.")
+                return
+
+            # Build the main audit trail from the NDA signing
+            nda_sig = policy_sigs.get("nda", {})
+            nda_pdf_p = Path(nda_pdf_path) if nda_pdf_path else None
+
+            audit_trail = {
+                "emp_id": emp_id,
+                "signer_name": nda_sig.get("sig_name", ""),
+                "timestamp_utc": nda_sig.get("signed_at", ""),
+                "source_ip": get_client_ip(),
+                "user_agent": "Attest-Streamlit-Portal/2.0",
+                "consent": True,
+                "signature_method": "typed-name",
+                "document_hash_before": sha256_file(nda_pdf_p) if (nda_pdf_p and nda_pdf_p.exists()) else "",
+                "document_hash_after": sha256_file(signed_nda) if Path(signed_nda).exists() else "",
+                "policies_signed": list(signed_ids),
+            }
+
+            d = get_emp_dir(emp_id)
+
+            # Save photo
+            if captured_photo:
+                photo_bytes = captured_photo.getvalue()
+                (d / "photo.jpg").write_bytes(photo_bytes)
+                if not MOCK_MODE:
+                    import boto3
+                    s3 = boto3.client("s3")
+                    s3.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=f"employees/{emp_id}/photo.jpg",
+                        Body=photo_bytes,
+                        ContentType="image/jpeg",
+                    )
+
+            # Copy signed-nda.pdf into the expected location
+            import shutil
+            shutil.copy(signed_nda, str(d / "signed-nda.pdf"))
+
+            # Save audit trail
+            (d / "nda-audit-trail.json").write_text(json.dumps(audit_trail, indent=2))
+
+            # Generate combined evidence PDF
+            combined_path = d / "combined-evidence.pdf"
+            try:
+                generate_combined_evidence_pdf(
+                    emp_id=emp_id,
+                    employee_data=data,
+                    audit_trail=audit_trail,
+                    policy_sigs=policy_sigs,
+                    photo_path=d / "photo.jpg" if (d / "photo.jpg").exists() else None,
+                    output_path=combined_path,
+                )
+            except Exception as e:
+                print(f"[portal] combined-evidence.pdf generation failed: {e}")
+
+            # Live mode: upload to S3 and dispatch nda-signed
+            if not MOCK_MODE:
+                import boto3
+                s3 = boto3.client("s3")
+                s3.put_object(
+                    Bucket=BUCKET_NAME,
+                    Key=f"employees/{emp_id}/signed-nda.pdf",
+                    Body=(d / "signed-nda.pdf").read_bytes(),
+                    ContentType="application/pdf",
+                )
+                s3.put_object(
+                    Bucket=BUCKET_NAME,
+                    Key=f"employees/{emp_id}/nda-audit-trail.json",
+                    Body=json.dumps(audit_trail, indent=2).encode(),
+                    ContentType="application/json",
+                )
+                if combined_path.exists():
+                    s3.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=f"employees/{emp_id}/combined-evidence.pdf",
+                        Body=combined_path.read_bytes(),
+                        ContentType="application/pdf",
+                    )
+                # Dispatch to GitHub Actions provisioning workflow
+                dispatch_to_github(emp_id, "nda-signed")
+
+            st.session_state.audit_trail = audit_trail
+            st.session_state.signed_nda_path = str(d / "signed-nda.pdf")
+            st.session_state.step = "approve"
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -887,6 +1314,22 @@ def step_approve() -> None:
                         st.session_state.emp_id,
                         approver=(approver or "mock-tech-lead").strip(),
                     )
+                    # Generate combined evidence PDF if not already done
+                    emp_id = st.session_state.emp_id
+                    d = get_emp_dir(emp_id)
+                    combined_path = d / "combined-evidence.pdf"
+                    if not combined_path.exists():
+                        try:
+                            generate_combined_evidence_pdf(
+                                emp_id=emp_id,
+                                employee_data=st.session_state.employee_data or {},
+                                audit_trail=st.session_state.audit_trail or {},
+                                policy_sigs=st.session_state.policy_sigs or {},
+                                photo_path=d / "photo.jpg" if (d / "photo.jpg").exists() else None,
+                                output_path=combined_path,
+                            )
+                        except Exception as e:
+                            print(f"[portal] combined-evidence.pdf generation failed: {e}")
                     st.session_state.evidence = result
                     st.session_state.step = "done"
                     st.rerun()
@@ -975,11 +1418,23 @@ def step_done() -> None:
     grants = evidence.get("grants", [])
     if grants:
         import pandas as pd
-        df = pd.DataFrame(grants)[
-            ["permission_name", "policy_arn", "granted_at", "approved_by", "mock"]
-        ]
-        df.columns = ["Permission", "Policy ARN", "Granted At", "Approved By", "Mock?"]
-        st.dataframe(df, use_container_width=True)
+        try:
+            df = pd.DataFrame(grants)
+            # Show available columns only
+            show_cols = [c for c in ["permission_name", "policy_arn", "granted_at", "approved_by", "real_provisioning"] if c in df.columns]
+            if show_cols:
+                rename_map = {
+                    "permission_name": "Permission",
+                    "policy_arn": "Policy ARN",
+                    "granted_at": "Granted At",
+                    "approved_by": "Approved By",
+                    "real_provisioning": "Real?",
+                }
+                st.dataframe(df[show_cols].rename(columns=rename_map), use_container_width=True)
+            else:
+                st.dataframe(df, use_container_width=True)
+        except Exception:
+            st.json(grants)
 
     st.subheader("📥 Download Evidence Files")
 
@@ -987,16 +1442,20 @@ def step_done() -> None:
         # Local filesystem download
         d = get_emp_dir(st.session_state.emp_id)
         file_map = {
-            "offer-letter.pdf":       ("Offer Letter",              "application/pdf"),
-            "employee.json":          ("Extracted Employee Data",   "application/json"),
-            "nda-unsigned.pdf":       ("Unsigned NDA",              "application/pdf"),
-            "signed-nda.pdf":         ("Signed NDA",                "application/pdf"),
-            "nda-audit-trail.json":   ("E-Signature Audit Trail",   "application/json"),
-            "photo.jpg":              ("Verification Photo (JPG)",  "image/jpeg"),
-            "access-granted.csv":     ("Access Grant Record (CSV)", "text/csv"),
-            "aws-access-credentials.csv": ("AWS Credentials (CSV)", "text/csv"),
-            "onboarding-report.pdf":  ("Compliance Report (PDF)",   "application/pdf"),
-            "evidence-index.json":    ("Evidence Index",            "application/json"),
+            "offer-letter.pdf":           ("Offer Letter",                  "application/pdf"),
+            "employee.json":              ("Extracted Employee Data",        "application/json"),
+            "nda-unsigned.pdf":           ("Unsigned NDA",                  "application/pdf"),
+            "signed-nda.pdf":             ("Signed NDA",                    "application/pdf"),
+            "signed-security.pdf":        ("Signed Security Policy",        "application/pdf"),
+            "signed-handbook.pdf":        ("Signed Employee Handbook",      "application/pdf"),
+            "signed-acceptable_use.pdf":  ("Signed Acceptable Use Policy",  "application/pdf"),
+            "nda-audit-trail.json":       ("E-Signature Audit Trail",       "application/json"),
+            "photo.jpg":                  ("Verification Photo (JPG)",      "image/jpeg"),
+            "access-granted.csv":         ("Access Grant Record (CSV)",     "text/csv"),
+            "aws-access-credentials.csv": ("AWS Credentials (CSV)",        "text/csv"),
+            "combined-evidence.pdf":      ("Combined Evidence Bundle PDF",  "application/pdf"),
+            "onboarding-report.pdf":      ("Compliance Report (PDF)",       "application/pdf"),
+            "evidence-index.json":        ("Evidence Index",                "application/json"),
         }
         cols = st.columns(3)
         for i, (fname, (label, mime)) in enumerate(file_map.items()):
@@ -1018,16 +1477,20 @@ def step_done() -> None:
         emp_id = st.session_state.emp_id
         prefix = f"employees/{emp_id}"
         file_map = {
-            "offer-letter.pdf":       ("Offer Letter",              "application/pdf"),
-            "employee.json":          ("Extracted Employee Data",   "application/json"),
-            "nda-unsigned.pdf":       ("Unsigned NDA",              "application/pdf"),
-            "signed-nda.pdf":         ("Signed NDA",                "application/pdf"),
-            "nda-audit-trail.json":   ("E-Signature Audit Trail",   "application/json"),
-            "photo.jpg":              ("Verification Photo (JPG)",  "image/jpeg"),
-            "access-granted.csv":     ("Access Grant Record (CSV)", "text/csv"),
-            "aws-access-credentials.csv": ("AWS Credentials (CSV)", "text/csv"),
-            "onboarding-report.pdf":  ("Compliance Report (PDF)",   "application/pdf"),
-            "evidence-index.json":    ("Evidence Index",            "application/json"),
+            "offer-letter.pdf":           ("Offer Letter",                  "application/pdf"),
+            "employee.json":              ("Extracted Employee Data",        "application/json"),
+            "nda-unsigned.pdf":           ("Unsigned NDA",                  "application/pdf"),
+            "signed-nda.pdf":             ("Signed NDA",                    "application/pdf"),
+            "signed-security.pdf":        ("Signed Security Policy",        "application/pdf"),
+            "signed-handbook.pdf":        ("Signed Employee Handbook",      "application/pdf"),
+            "signed-acceptable_use.pdf":  ("Signed Acceptable Use Policy",  "application/pdf"),
+            "nda-audit-trail.json":       ("E-Signature Audit Trail",       "application/json"),
+            "photo.jpg":                  ("Verification Photo (JPG)",      "image/jpeg"),
+            "access-granted.csv":         ("Access Grant Record (CSV)",     "text/csv"),
+            "aws-access-credentials.csv": ("AWS Credentials (CSV)",        "text/csv"),
+            "combined-evidence.pdf":      ("Combined Evidence Bundle PDF",  "application/pdf"),
+            "onboarding-report.pdf":      ("Compliance Report (PDF)",       "application/pdf"),
+            "evidence-index.json":        ("Evidence Index",                "application/json"),
         }
         cols = st.columns(3)
         for i, (fname, (label, mime)) in enumerate(file_map.items()):

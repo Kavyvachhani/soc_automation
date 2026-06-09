@@ -256,7 +256,7 @@ resource "aws_iam_role_policy" "github_collector_readonly" {
   })
 }
 
-# Lambda deploy permission
+# Lambda deploy + invoke permission
 resource "aws_iam_role_policy" "github_lambda_deploy" {
   name = "lambda-deploy"
   role = aws_iam_role.github_actions.id
@@ -270,6 +270,16 @@ resource "aws_iam_role_policy" "github_lambda_deploy" {
         Action = [
           "lambda:UpdateFunctionCode",
           "lambda:GetFunction",
+        ]
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${var.project_name}-*",
+        ]
+      },
+      {
+        Sid    = "LambdaInvoke"
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction",
         ]
         Resource = [
           "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${var.project_name}-*",

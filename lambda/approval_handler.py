@@ -84,6 +84,135 @@ def now_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def generate_compliant_password() -> str:
+    """Generate a 16-character password meeting AWS IAM default policy requirements.
+    
+    AWS default policy: min 8 chars, requires uppercase, lowercase, number, symbol.
+    We use 16 chars (4 of each class) for extra security, then shuffle.
+    """
+    import random
+    import string
+    # Guarantee at least 4 of each required character class
+    uppers = [random.choice(string.ascii_uppercase) for _ in range(4)]
+    lowers = [random.choice(string.ascii_lowercase) for _ in range(4)]
+    digits = [random.choice(string.digits) for _ in range(4)]
+    # Use only unambiguous special chars that all AWS IAM password policies accept
+    specials = [random.choice("!@#$%^&*()-_=+") for _ in range(4)]
+    password_list = uppers + lowers + digits + specials
+    random.shuffle(password_list)
+    return ''.join(password_list)
+
+
+def approve_github_actions_run(emp_id: str) -> bool:
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    github_org = os.environ.get("GITHUB_ORG", "")
+    github_repo = os.environ.get("GITHUB_REPO", "attest")
+
+    if not github_token or not github_org:
+        print("[approve_gha] GITHUB_TOKEN or GITHUB_ORG not set; cannot approve workflow run.")
+        return False
+
+    import urllib.request
+    import urllib.error
+    
+    # 1. List runs in waiting state
+    url = f"https://api.github.com/repos/{github_org}/{github_repo}/actions/runs?status=waiting"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            runs = data.get("workflow_runs", [])
+            print(f"[approve_gha] Found {len(runs)} waiting runs.")
+    except Exception as e:
+        print(f"[approve_gha] Failed to list runs: {e}")
+        return False
+
+    target_run = None
+    for run in runs:
+        title = run.get("display_title", "")
+        if emp_id in title or emp_id in run.get("name", ""):
+            target_run = run
+            break
+
+    if not target_run:
+        print(f"[approve_gha] No run found matching title for {emp_id}. Checking all runs...")
+        url = f"https://api.github.com/repos/{github_org}/{github_repo}/actions/runs?per_page=10"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {github_token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                for run in data.get("workflow_runs", []):
+                    title = run.get("display_title", "")
+                    if emp_id in title and run.get("status") == "waiting":
+                        target_run = run
+                        break
+        except Exception as e:
+            print(f"[approve_gha] Failed to query all runs: {e}")
+
+    if not target_run:
+        print(f"[approve_gha] ERROR: No waiting workflow run found for {emp_id}")
+        return False
+
+    run_id = target_run["id"]
+    print(f"[approve_gha] Found target run {run_id} in status={target_run['status']}")
+
+    # 2. Get pending deployments for this run
+    pending_url = f"https://api.github.com/repos/{github_org}/{github_repo}/actions/runs/{run_id}/pending_deployments"
+    req_pending = urllib.request.Request(
+        pending_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req_pending, timeout=10) as resp:
+            deployments = json.loads(resp.read().decode())
+            print(f"[approve_gha] Found {len(deployments)} pending deployments.")
+    except Exception as e:
+        print(f"[approve_gha] Failed to get pending deployments: {e}")
+        return False
+
+    if not deployments:
+        print("[approve_gha] No pending deployments found for this run.")
+        return False
+
+    # 3. Approve the deployment
+    approve_body = json.dumps({
+        "environment_name": "provisioning",
+        "state": "approved",
+        "comment": "Approved via Attest Portal"
+    }).encode()
+
+    req_approve = urllib.request.Request(
+        pending_url,
+        data=approve_body,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req_approve, timeout=10) as resp:
+            print(f"[approve_gha] Successfully approved run {run_id}. Status: {resp.status}")
+            return True
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        print(f"[approve_gha] Approval API failed: {exc.code} {body}")
+        return False
+
+
 # ─── Access bundle catalog (hardcoded to avoid S3 round-trip in Lambda) ──────
 
 CATALOG = {
@@ -106,11 +235,18 @@ CATALOG = {
 def create_iam_user(employee_data: dict, role_key: str, emp_id: str) -> dict:
     """Create a real IAM user under attest-managed/ path with role-based policies."""
     name = employee_data.get("name", "employee").replace(" ", "-").lower()
-    username = f"attest-managed/{name}-{emp_id.lower()}"
+    username = f"{name}-{emp_id.lower()}"
 
     bundles = CATALOG.get(role_key, CATALOG["fresher"])
 
-    result = {"username": username, "real": True, "policies_attached": []}
+    result = {
+        "username": username,
+        "real": True,
+        "policies_attached": [],
+        "access_key_id": "None",
+        "secret_access_key": "None",
+        "temp_password": "None"
+    }
 
     try:
         iam.create_user(
@@ -132,18 +268,22 @@ def create_iam_user(employee_data: dict, role_key: str, emp_id: str) -> dict:
             print(f"[IAM] Attached {bundle['name']} ({arn})")
 
         # Create console login profile (force password change on first login)
-        import secrets
-        temp_password = secrets.token_urlsafe(16) + "!A1"
+        temp_password = generate_compliant_password()
         iam.create_login_profile(
             UserName=username,
             Password=temp_password,
             PasswordResetRequired=True,
         )
-        # NOTE: We do NOT store or email the temp password.
-        # The tech lead receives it out of band. Never email plaintext passwords.
         result["console_login"] = True
         result["password_reset_required"] = True
+        result["temp_password"] = temp_password
         print(f"[IAM] Console login created (password reset required)")
+
+        # Create access key
+        key_resp = iam.create_access_key(UserName=username)
+        result["access_key_id"] = key_resp["AccessKey"]["AccessKeyId"]
+        result["secret_access_key"] = key_resp["AccessKey"]["SecretAccessKey"]
+        print(f"[IAM] Programmatic Access Key generated successfully")
 
     except Exception as e:
         result["error"] = str(e)
@@ -155,11 +295,23 @@ def create_iam_user(employee_data: dict, role_key: str, emp_id: str) -> dict:
 def mock_provision(employee_data: dict, role_key: str, emp_id: str) -> dict:
     """Mock provisioning — log what would happen without creating real resources."""
     bundles = CATALOG.get(role_key, CATALOG["fresher"])
-    result = {"username": f"attest-managed/{employee_data.get('name', 'employee').replace(' ', '-').lower()}", "real": False, "policies_attached": []}
+    name = employee_data.get("name", "employee").replace(" ", "-").lower()
+    username = f"{name}-{emp_id.lower()}"
+    
+    print(f"[MOCK] Mock provisioning for {username} as {role_key}")
     for bundle in bundles:
         print(f"[MOCK] Would grant '{bundle['name']}' ({bundle['policy_arn']}) to {employee_data.get('name')}")
-        result["policies_attached"].append(bundle["policy_arn"])
-    return result
+        
+    return {
+        "username": username,
+        "real": False,
+        "policies_attached": [b["policy_arn"] for b in bundles],
+        "access_key_id": "AKIAZOXT_MOCK_DEV_KEY",
+        "secret_access_key": "MOCK_SECRET_KEY_ICxrD/qppenl94PY5LvfRsJ4",
+        "temp_password": "MockPassword123!A1",
+        "console_login": True,
+        "password_reset_required": True
+    }
 
 
 # ─── Email notification ──────────────────────────────────────────────────────
@@ -205,15 +357,143 @@ def send_confirmation_email(employee_data: dict, role_key: str, approver: str) -
         print(f"[SES] Failed to send email: {e}")
 
 
+# ─── PDF Report Generation ───────────────────────────────────────────────────
+
+def generate_onboarding_report_pdf(
+    emp_id: str,
+    employee_data: dict,
+    role_key: str,
+    approver: str,
+    credentials_data: dict,
+    photo_path: str,
+    output_path: str,
+) -> None:
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+    
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+    
+    # Title Banner
+    pdf.set_fill_color(15, 23, 42) # slate-900
+    pdf.rect(0, 0, 210, 40, "F")
+    
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_y(15)
+    pdf.cell(0, 10, "SOC 2 ONBOARDING COMPLIANCE REPORT", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # Reset text color
+    pdf.set_text_color(33, 37, 41)
+    pdf.ln(15)
+    
+    # Photo placement
+    y_start = pdf.get_y()
+    has_photo = False
+    if photo_path and os.path.exists(photo_path):
+        try:
+            # Render photo on the right side
+            pdf.image(photo_path, x=140, y=y_start, w=45, h=45)
+            has_photo = True
+        except Exception as e:
+            print(f"Failed to embed photo in PDF: {e}")
+            
+    # Metadata details on the left side
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(110, 6, "Employee Information", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(35, 5, "Employee Name:")
+    pdf.cell(75, 5, str(employee_data.get("name", "Unknown")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Employee ID:")
+    pdf.cell(75, 5, str(emp_id), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Designation:")
+    pdf.cell(75, 5, str(employee_data.get("designation", "Employee")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Team:")
+    pdf.cell(75, 5, str(employee_data.get("team", "Engineering")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Experience Level:")
+    pdf.cell(75, 5, str(employee_data.get("experience_level", "fresher")).capitalize(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Approved By:")
+    pdf.cell(75, 5, str(approver), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    if has_photo:
+        pdf.set_y(max(pdf.get_y(), y_start + 50))
+    else:
+        pdf.ln(5)
+    
+    # Divider
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(4)
+    
+    # Access Privileges Section
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, "Granted AWS Access Privileges (SOC 2 Compliant)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    
+    bundles = CATALOG.get(role_key, CATALOG["fresher"])
+    
+    # Header Table
+    pdf.set_fill_color(241, 245, 249)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(45, 7, "Service", border=1, fill=True)
+    pdf.cell(125, 7, "AWS Scoped Policy ARN", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    pdf.set_font("Helvetica", "", 8)
+    for bundle in bundles:
+        pdf.cell(45, 7, str(bundle["name"]), border=1)
+        pdf.cell(125, 7, str(bundle["policy_arn"]), border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+    pdf.ln(4)
+    
+    # Credentials Section
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, "AWS Account Credentials Details", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(35, 5, "IAM Username:")
+    pdf.cell(135, 5, str(credentials_data.get("username")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Console Login URL:")
+    pdf.cell(135, 5, str(credentials_data.get("console_url")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Access Key ID:")
+    pdf.cell(135, 5, str(credentials_data.get("access_key_id")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    pdf.ln(2)
+    pdf.set_fill_color(254, 243, 199) # warning background color
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(0, 5, "SOC 2 SECURITY NOTICE:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.multi_cell(0, 4, "1. Password Reset: You must reset your temporary password on your first console sign-in.\n"
+                         "2. Multi-Factor Authentication (MFA): MFA enrollment is strictly required within 24 hours of onboarding.\n"
+                         "3. Access Keys: Keep your API Access Keys secure. Never commit them to git repositories.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    pdf.ln(4)
+    # E-Signature Section
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, "Electronic Signature & Verification Audit Trail", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    
+    pdf.cell(35, 5, "Signer Name:")
+    pdf.cell(135, 5, str(employee_data.get("name")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Signed At (UTC):")
+    pdf.cell(135, 5, str(credentials_data.get("timestamp")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Source IP:")
+    pdf.cell(135, 5, str(credentials_data.get("ip")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Signature Method:")
+    pdf.cell(135, 5, "Typed Legal Name (Consent Captured)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    pdf.output(output_path)
+
+
 # ─── Build evidence ──────────────────────────────────────────────────────────
 
 def build_evidence(emp_id: str, employee_data: dict, role_key: str, approver: str, iam_result: dict) -> dict:
-    """Write access-granted.csv and evidence-index.json to S3."""
+    """Write access-granted.csv, aws-access-credentials.csv, and evidence-index.json to S3."""
     prefix = f"employees/{emp_id}"
     bundles = CATALOG.get(role_key, CATALOG["fresher"])
     ts = now_utc()
 
-    # Build CSV rows
+    # 1. Build access-granted.csv rows
     grants = []
     for bundle in bundles:
         grants.append({
@@ -231,12 +511,82 @@ def build_evidence(emp_id: str, employee_data: dict, role_key: str, approver: st
     s3_put_csv(f"{prefix}/access-granted.csv", grants)
     print(f"[Evidence] Wrote {prefix}/access-granted.csv")
 
+    # 2. Build aws-access-credentials.csv
+    try:
+        sts = boto3.client("sts")
+        account_id = sts.get_caller_identity()["Account"]
+    except Exception:
+        account_id = "669167971016"
+        
+    console_url = f"https://{account_id}.signin.aws.amazon.com/console"
+    
+    credentials = [{
+        "emp_id": emp_id,
+        "employee_name": employee_data.get("name", "Unknown"),
+        "iam_username": iam_result.get("username", "Unknown"),
+        "console_url": console_url,
+        "temporary_password": iam_result.get("temp_password", "PasswordResetRequired"),
+        "access_key_id": iam_result.get("access_key_id", "None"),
+        "secret_access_key": iam_result.get("secret_access_key", "None"),
+        "mfa_required": "true",
+        "mfa_instructions": "Download Google Authenticator, log in to Console, go to My Security Credentials -> Assign MFA Device."
+    }]
+    
+    s3_put_csv(f"{prefix}/aws-access-credentials.csv", credentials)
+    print(f"[Evidence] Wrote {prefix}/aws-access-credentials.csv")
+
+    # 3. Generate onboarding-report.pdf
+    photo_local = "/tmp/photo.jpg"
+    if os.path.exists(photo_local):
+        try:
+            os.remove(photo_local)
+        except Exception:
+            pass
+            
+    has_photo = False
+    try:
+        s3.download_file(S3_BUCKET, f"{prefix}/photo.jpg", photo_local)
+        has_photo = True
+    except Exception as e:
+        print(f"[Evidence] Verification photo not found in S3: {e}")
+
+    report_local = f"/tmp/onboarding-report-{emp_id}.pdf"
+    
+    credentials_data = {
+        "username": iam_result.get("username"),
+        "console_url": console_url,
+        "access_key_id": iam_result.get("access_key_id"),
+        "timestamp": ts,
+        "ip": employee_data.get("ip_address", "127.0.0.1"),
+    }
+    
+    try:
+        generate_onboarding_report_pdf(
+            emp_id=emp_id,
+            employee_data=employee_data,
+            role_key=role_key,
+            approver=approver,
+            credentials_data=credentials_data,
+            photo_path=photo_local if has_photo else None,
+            output_path=report_local
+        )
+        s3.upload_file(
+            report_local,
+            S3_BUCKET,
+            f"{prefix}/onboarding-report.pdf",
+            ExtraArgs={"ContentType": "application/pdf"}
+        )
+        print(f"[Evidence] Wrote {prefix}/onboarding-report.pdf")
+    except Exception as e:
+        print(f"[Evidence] Failed to generate onboarding-report.pdf: {e}")
+
     # Check what evidence files exist for this employee
     evidence_files = []
     for suffix in [
         "offer-letter.pdf", "employee.json", "nda-content.txt",
         "nda-unsigned.pdf", "signed-nda.pdf", "nda-audit-trail.json",
-        "access-granted.csv",
+        "photo.jpg", "access-granted.csv", "aws-access-credentials.csv",
+        "onboarding-report.pdf"
     ]:
         try:
             s3.head_object(Bucket=S3_BUCKET, Key=f"{prefix}/{suffix}")
@@ -254,7 +604,11 @@ def build_evidence(emp_id: str, employee_data: dict, role_key: str, approver: st
         "approved_at": ts,
         "provisioned_at": ts,
         "real_provisioning": ENABLE_REAL,
-        "iam_result": iam_result,
+        "iam_result": {
+            "username": iam_result.get("username"),
+            "policies_attached": iam_result.get("policies_attached"),
+            "real": iam_result.get("real")
+        },
         "evidence_files": evidence_files + ["evidence-index.json"],
         "s3_prefix": f"s3://{S3_BUCKET}/{prefix}/",
         "pipeline_version": "2.0",

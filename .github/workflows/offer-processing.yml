@@ -32,53 +32,117 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
       - name: Configure AWS credentials (via OIDC Role)
         if: ${{ secrets.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install --quiet pypdf fpdf2 pyyaml python-dateutil boto3
-
-      - name: Download raw offer letter
+      # ── Invoke offer_processor Lambda directly (primary path) ──────────────
+      # The Lambda is already deployed and triggered by S3 ObjectCreated, but
+      # invoking it here ensures the workflow stays in sync and provides logs.
+      - name: Invoke offer_processor Lambda
+        id: invoke_lambda
         run: |
           set -euo pipefail
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-offer-processor"
+          BUCKET="${{ secrets.S3_BUCKET }}"
+          EMP_ID="${{ env.EMP_ID }}"
+
+          # Build a synthetic S3 event payload identical to what S3 sends
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          bucket = sys.argv[1]
+          emp_id = sys.argv[2]
+          key = f'employees/{emp_id}/offer-letter.pdf'
+          event = {
+            'Records': [{
+              's3': {
+                'bucket': {'name': bucket},
+                'object': {'key': key, 'size': 0}
+              }
+            }]
+          }
+          print(json.dumps(event))
+          " "$BUCKET" "$EMP_ID")
+
+          echo "Invoking Lambda: $FUNCTION_NAME"
+          RESULT=$(aws lambda invoke \
+            --function-name "$FUNCTION_NAME" \
+            --payload "$PAYLOAD" \
+            --cli-binary-format raw-in-base64-out \
+            --log-type Tail \
+            --no-cli-pager \
+            /tmp/lambda-response.json 2>&1)
+
+          # Print Lambda logs (base64-encoded in Tail mode)
+          LOG_RESULT=$(aws lambda invoke \
+            --function-name "$FUNCTION_NAME" \
+            --payload "$PAYLOAD" \
+            --cli-binary-format raw-in-base64-out \
+            --log-type Tail \
+            --query 'LogResult' \
+            --output text \
+            --no-cli-pager \
+            /dev/null 2>/dev/null || true)
+
+          echo "=== Lambda Response ==="
+          cat /tmp/lambda-response.json
+
+          # Check for function error
+          if grep -q '"FunctionError"' <<< "$RESULT" || grep -q '"errorMessage"' /tmp/lambda-response.json 2>/dev/null; then
+            echo "Lambda invocation reported an error"
+            exit 1
+          fi
+
+          echo "Lambda invoked successfully"
+
+      # ── Fallback: run inline if Lambda invocation fails ────────────────────
+      - name: Fallback — run offer processor inline
+        if: failure() && steps.invoke_lambda.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          pip install --quiet pypdf fpdf2 pyyaml python-dateutil boto3 anthropic
+
           mkdir -p data/employees/${{ env.EMP_ID }}
           aws s3 cp \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/offer-letter.pdf" \
             "data/employees/${{ env.EMP_ID }}/offer-letter.pdf"
 
-      - name: Run offer processor logic
-        run: |
-          set -euo pipefail
-          export DATA_DIR="./data"
-          export S3_BUCKET="${{ secrets.S3_BUCKET }}"
-          python -c "
+          export ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+          python3 -c "
           import sys
           sys.path.append('lambda')
           from offer_processor import process_offer_letter_local
           from pathlib import Path
-          
-          emp_id = '${{ env.EMP_ID }}'
-          emp_dir = Path('data/employees') / emp_id
-          pdf_path = emp_dir / 'offer-letter.pdf'
-          
-          process_offer_letter_local(pdf_path, emp_id, Path('data'))
+          process_offer_letter_local(
+            'data/employees/${{ env.EMP_ID }}/offer-letter.pdf',
+            '${{ env.EMP_ID }}',
+            Path('data')
+          )
           "
-
-      - name: Upload processed outputs to S3
-        run: |
-          set -euo pipefail
           aws s3 sync \
             "data/employees/${{ env.EMP_ID }}/" \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/"
+
+      # ── Verify outputs landed in S3 ────────────────────────────────────────
+      - name: Verify S3 outputs exist
+        run: |
+          set -euo pipefail
+          BUCKET="${{ secrets.S3_BUCKET }}"
+          EMP_ID="${{ env.EMP_ID }}"
+          PREFIX="employees/${EMP_ID}"
+
+          echo "Checking S3 outputs for ${EMP_ID}..."
+          for KEY in employee.json nda-content.txt nda-unsigned.pdf; do
+            aws s3api head-object \
+              --bucket "$BUCKET" \
+              --key "${PREFIX}/${KEY}" \
+              --no-cli-pager \
+              && echo "✅ ${KEY}" \
+              || { echo "❌ MISSING: ${KEY}"; exit 1; }
+          done
+          echo "All expected outputs verified in S3."

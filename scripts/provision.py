@@ -38,8 +38,43 @@ def find_catalog() -> Path:
 # ─── PDF Report Generation ───────────────────────────────────────────────────
 
 def _safe(s: str) -> str:
-    """Encode string to latin-1 safely for fpdf core fonts."""
-    return str(s).encode("latin-1", errors="replace").decode("latin-1")
+    """Encode string to latin-1 safely for fpdf core fonts.
+    Replaces common unicode punctuation with ASCII equivalents.
+    """
+    replacements = {
+        '\u2019': "'",    # right single quotation mark
+        '\u2018': "'",    # left single quotation mark
+        '\u201c': '"',    # left double quotation mark
+        '\u201d': '"',    # right double quotation mark
+        '\u2013': '-',    # en dash
+        '\u2014': '--',   # em dash
+        '\u2022': '*',    # bullet
+        '\u2026': '...',  # ellipsis
+        '\u00a0': ' ',    # non-breaking space
+    }
+    s = str(s)
+    for orig, repl in replacements.items():
+        s = s.replace(orig, repl)
+    return s.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def generate_compliant_password() -> str:
+    """Generate a 16-character password meeting AWS IAM default policy requirements.
+    
+    AWS default policy: min 8 chars, requires uppercase, lowercase, number, symbol.
+    We use 16 chars (4 of each class) for extra security, then shuffle.
+    """
+    import random
+    import string
+    # Guarantee at least 4 of each required character class
+    uppers = [random.choice(string.ascii_uppercase) for _ in range(4)]
+    lowers = [random.choice(string.ascii_lowercase) for _ in range(4)]
+    digits = [random.choice(string.digits) for _ in range(4)]
+    # Use only unambiguous special chars that all AWS IAM password policies accept
+    specials = [random.choice("!@#$%^&*()-_=+") for _ in range(4)]
+    password_list = uppers + lowers + digits + specials
+    random.shuffle(password_list)
+    return ''.join(password_list)
 
 
 def generate_onboarding_report_pdf(
@@ -101,7 +136,10 @@ def generate_onboarding_report_pdf(
     pdf.cell(35, 5, "Approved By:")
     pdf.cell(75, 5, _safe(approver), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
-    pdf.set_y(y_start + 50) # Make sure we clear the photo height
+    if has_photo:
+        pdf.set_y(max(pdf.get_y(), y_start + 50))
+    else:
+        pdf.ln(5)
     
     # Divider
     pdf.set_draw_color(226, 232, 240)
@@ -140,7 +178,7 @@ def generate_onboarding_report_pdf(
     pdf.ln(2)
     pdf.set_fill_color(254, 243, 199) # warning background color
     pdf.set_font("Helvetica", "B", 8)
-    pdf.cell(0, 5, "⚠️ SOC 2 SECURITY NOTICE:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, "SOC 2 SECURITY NOTICE:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 8)
     pdf.multi_cell(0, 4, "1. Password Reset: You must reset your temporary password on your first console sign-in.\n"
                          "2. Multi-Factor Authentication (MFA): MFA enrollment is strictly required within 24 hours of onboarding.\n"
@@ -352,7 +390,7 @@ def _mock_provision(employee_data: dict, bundles: list, emp_id: str) -> dict:
         "policies_attached": [bundle.get("policy_arn", "") for bundle in bundles],
         "access_key_id": "AKIAZOXT_MOCK_DEV_KEY",
         "secret_access_key": "MOCK_SECRET_KEY_ICxrD/qppenl94PY5LvfRsJ4",
-        "temp_password": "MockPassword123!A1",
+        "temp_password": generate_compliant_password(),
         "console_login": True,
         "password_reset_required": True
     }
@@ -406,8 +444,7 @@ def _real_provision(employee_data: dict, bundles: list, emp_id: str, now_ts: str
                 print(f"  [IAM] Attached: {bundle.get('name')} ({arn})")
 
         # Create console login (force password change)
-        import secrets
-        temp_pass = secrets.token_urlsafe(16) + "!A1"
+        temp_pass = generate_compliant_password()
         iam.create_login_profile(
             UserName=username,
             Password=temp_pass,
@@ -440,9 +477,11 @@ def _collect_evidence_files(emp_dir: Path) -> list:
     """List all evidence files in the employee directory."""
     expected = [
         "offer-letter.pdf", "employee.json", "nda-content.txt",
-        "nda-unsigned.pdf", "signed-nda.pdf", "nda-audit-trail.json",
+        "nda-unsigned.pdf", "signed-nda.pdf",
+        "signed-security.pdf", "signed-handbook.pdf", "signed-acceptable_use.pdf",
+        "nda-audit-trail.json",
         "photo.jpg", "access-granted.csv", "aws-access-credentials.csv",
-        "onboarding-report.pdf", "evidence-index.json",
+        "combined-evidence.pdf", "onboarding-report.pdf", "evidence-index.json",
     ]
     seen = set()
     collected = []
