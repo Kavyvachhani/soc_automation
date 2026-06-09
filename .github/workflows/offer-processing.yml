@@ -1,0 +1,84 @@
+name: Offer Letter Processing
+
+on:
+  repository_dispatch:
+    types: [offer-uploaded]
+  workflow_dispatch:
+    inputs:
+      emp_id:
+        description: "Employee ID"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  process-offer:
+    name: Process Offer Letter for ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+    runs-on: ubuntu-latest
+
+    env:
+      EMP_ID: ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (via Access Keys)
+        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Configure AWS credentials (via OIDC Role)
+        if: ${{ secrets.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --quiet pypdf fpdf2 pyyaml python-dateutil boto3
+
+      - name: Download raw offer letter
+        run: |
+          set -euo pipefail
+          mkdir -p data/employees/${{ env.EMP_ID }}
+          aws s3 cp \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/offer-letter.pdf" \
+            "data/employees/${{ env.EMP_ID }}/offer-letter.pdf"
+
+      - name: Run offer processor logic
+        run: |
+          set -euo pipefail
+          export DATA_DIR="./data"
+          export S3_BUCKET="${{ secrets.S3_BUCKET }}"
+          python -c "
+          import sys
+          sys.path.append('lambda')
+          from offer_processor import process_offer_letter_local
+          from pathlib import Path
+          
+          emp_id = '${{ env.EMP_ID }}'
+          emp_dir = Path('data/employees') / emp_id
+          pdf_path = emp_dir / 'offer-letter.pdf'
+          
+          process_offer_letter_local(pdf_path, emp_id, Path('data'))
+          "
+
+      - name: Upload processed outputs to S3
+        run: |
+          set -euo pipefail
+          aws s3 sync \
+            "data/employees/${{ env.EMP_ID }}/" \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/"

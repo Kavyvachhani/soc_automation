@@ -294,3 +294,29 @@ def handler(event: dict, context) -> dict:
             raise
 
     return {"statusCode": 200, "body": "OK"}
+
+
+def process_offer_letter_local(pdf_path, emp_id, data_dir):
+    from pathlib import Path
+    emp_dir = data_dir / "employees" / emp_id
+    emp_dir.mkdir(parents=True, exist_ok=True)
+    pdf_bytes = Path(pdf_path).read_bytes()
+    text = extract_pdf_text(pdf_bytes)
+    employee_data = extract_employee_data(text)
+    employee_data.update({
+        "emp_id": emp_id,
+        "source_file": Path(pdf_path).name,
+        "extracted_at": datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z",
+    })
+    
+    # Store employee.json
+    (emp_dir / "employee.json").write_text(json.dumps(employee_data, indent=2))
+    
+    # Fill NDA template
+    nda_text = fill_nda_template(employee_data, emp_id)
+    (emp_dir / "nda-content.txt").write_text(nda_text)
+    
+    # Render and store unsigned NDA PDF
+    pdf_bytes_out = render_nda_pdf(nda_text)
+    (emp_dir / "nda-unsigned.pdf").write_bytes(pdf_bytes_out)
+    print(f"[Local Offer Processor] Processed {emp_id} successfully.")

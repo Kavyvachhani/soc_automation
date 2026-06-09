@@ -95,6 +95,41 @@ def get_approval_api_url() -> str:
     return ""
 
 
+def dispatch_to_github(emp_id: str, event_type: str) -> None:
+    import urllib.request
+    import urllib.error
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    github_org = os.environ.get("GITHUB_ORG", "")
+    github_repo = os.environ.get("GITHUB_REPO", "attest")
+
+    if not github_token or not github_org:
+        print(f"[dispatch] GITHUB_TOKEN or GITHUB_ORG not set; skipping dispatch for {event_type}")
+        return
+
+    url = f"https://api.github.com/repos/{github_org}/{github_repo}/dispatches"
+    payload = json.dumps({
+        "event_type": event_type,
+        "client_payload": {"emp_id": emp_id}
+    }).encode()
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f"[dispatch] GitHub dispatch OK: status={resp.status} event_type={event_type}")
+    except Exception as exc:
+        print(f"[dispatch] GitHub dispatch failed: {exc}")
+
+
 # ── PDF text extraction ────────────────────────────────────────────────────────
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
@@ -597,7 +632,7 @@ def step_upload() -> None:
                     if MOCK_MODE:
                         data, nda_text, nda_pdf_path = process_offer_letter_mock(pdf_bytes, emp_id)
                     else:
-                        # Real mode: push to S3 and poll for Lambda output
+                        # Real mode: push to S3 and trigger GitHub workflow
                         import boto3, time
                         s3 = boto3.client("s3")
                         s3.put_object(
@@ -605,7 +640,9 @@ def step_upload() -> None:
                             Key=f"employees/{emp_id}/offer-letter.pdf",
                             Body=pdf_bytes,
                         )
-                        st.info("Offer letter uploaded. Waiting for Lambda processing…")
+                        st.info("Offer letter uploaded to vault. Triggering processing workflow in GitHub Actions…")
+                        dispatch_to_github(emp_id, "offer-uploaded")
+                        st.info("Waiting for workflow to complete & NDA to generate…")
                         nda_pdf_path = None
                         for _ in range(30):
                             time.sleep(2)
