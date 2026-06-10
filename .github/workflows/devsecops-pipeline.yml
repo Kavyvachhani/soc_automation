@@ -55,7 +55,7 @@ jobs:
         id: bandit
         run: |
           mkdir -p scan-results
-          bandit -r scripts/ lambda/ portal/ \
+          bandit -r scripts/ lambda/ portal/ vulnerable_app/ \
             -f json -o scan-results/bandit.json \
             --severity-level low --confidence-level low \
             -x .venv,__pycache__,build_lambda,build 2>&1 || true
@@ -93,7 +93,7 @@ jobs:
             --json \
             --output scan-results/semgrep.json \
             --no-git-ignore \
-            scripts/ lambda/ portal/ 2>&1 || true
+            scripts/ lambda/ portal/ vulnerable_app/ 2>&1 || true
 
           CRITICAL=$(python3 -c "
           import json
@@ -137,7 +137,7 @@ jobs:
         run: |
           mkdir -p scan-results
           # Scan all requirements files
-          for req in requirements.txt lambda/requirements.txt portal/requirements.txt; do
+          for req in requirements.txt lambda/requirements.txt portal/requirements.txt vulnerable_app/requirements.txt; do
             if [ -f "$req" ]; then
               echo "Scanning $req ..."
               pip-audit -r "$req" --format json 2>/dev/null >> scan-results/pip_audit_raw.json || true
@@ -290,14 +290,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           mkdir -p scan-results
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ANTHROPIC_API_KEY not set — skipping AI pentest"
-            echo '{"findings":[],"summary":{},"soc2_observations":[],"positive_findings":[]}' > scan-results/ai-pentest.json
-          else
-            python3 scripts/ai_pentest.py \
-              --output scan-results/ai-pentest.json \
-              --scan-dirs lambda/ portal/ scripts/ 2>&1 || true
-          fi
+          python3 scripts/ai_pentest.py \
+            --output scan-results/ai-pentest.json \
+            --scan-dirs lambda/ portal/ scripts/ vulnerable_app/ 2>&1 || true
 
           CRITICAL=$(python3 -c "
           import json
