@@ -30,7 +30,9 @@ from botocore.exceptions import ClientError
 S3_BUCKET = os.environ.get("S3_BUCKET", "attest-vault-669167971016")
 REGION    = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
-s3 = boto3.client("s3", region_name=REGION)
+from botocore.config import Config as BotocoreConfig
+s3 = boto3.client("s3", region_name=REGION,
+                  config=BotocoreConfig(signature_version="s3v4"))
 
 
 def now_utc() -> str:
