@@ -15,7 +15,18 @@ import json
 import os
 import sys
 from pathlib import Path
-
+try:
+    import fpdf
+    # Global monkeypatch to fix FPDF latin-1 UnicodeEncodeError
+    orig_normalize = fpdf.FPDF.normalize_text
+    def safe_normalize(self, text):
+        if not text: return text
+        text = str(text).replace("\u2026", "...").replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"').replace("\u2013", "-").replace("\u2014", "--")
+        text = str(text).encode("latin-1", "replace").decode("latin-1")
+        return orig_normalize(self, text)
+    fpdf.FPDF.normalize_text = safe_normalize
+except ImportError:
+    pass
 
 # ─── Safe latin-1 encoding helper ────────────────────────────────────────────
 

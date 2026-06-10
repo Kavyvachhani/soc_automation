@@ -3,7 +3,7 @@ name: Compliance Evidence Collection
 # Triggers for SOC 2 evidence collection
 on:
   schedule:
-    - cron: "0 6 * * 1"   # Every Monday 06:00 UTC
+    - cron: "0 0 * * *"   # Every night at 00:00 UTC
   workflow_dispatch:
   push:
     branches: [main]
@@ -61,7 +61,7 @@ jobs:
             --bucket "${{ secrets.S3_BUCKET }}" \
             --upload
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}
           
       - name: Collect Zoho HR Evidence
         run: |
@@ -73,7 +73,18 @@ jobs:
           ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
           ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
           ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
+
+      - name: Run Shannon AI Pentest
+        run: |
+          python scripts/ai_pentest.py \
+            --target "https://${{ secrets.PROJECT_NAME }}-portal.example.com/api" \
+            --output /tmp/evidence \
+            --bucket "${{ secrets.S3_BUCKET }}" \
+            --upload
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           
+
       - name: Run Compliance Engine
         run: |
           python scripts/compliance_engine.py \
@@ -99,4 +110,16 @@ jobs:
           path: |
             /tmp/evidence/
             /tmp/reports/
+
+      - name: Create Urgent Incident Alert
+        if: failure()
+        run: |
+          gh issue create \
+            --title "🚨 URGENT: SOC 2 Compliance / Security Failure" \
+            --body "The automated nightly SOC 2 compliance engine has detected a critical failure or missing evidence. Please review the attached workflow logs and reports in the S3 vault immediately." \
+            --label "security,critical,compliance" \
+            --assignee "@me"
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}
+
           retention-days: 90

@@ -12,6 +12,18 @@ import sys
 from pathlib import Path
 
 try:
+    import fpdf
+    # Global monkeypatch to fix FPDF latin-1 UnicodeEncodeError
+    orig_normalize = fpdf.FPDF.normalize_text
+    def safe_normalize(self, text):
+        if not text: return text
+        text = str(text).replace("\u2026", "...").replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"').replace("\u2013", "-").replace("\u2014", "--")
+        text = str(text).encode("latin-1", "replace").decode("latin-1")
+        return orig_normalize(self, text)
+    fpdf.FPDF.normalize_text = safe_normalize
+except ImportError:
+    pass
+try:
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
 except ImportError:
@@ -132,10 +144,31 @@ def main():
 
     summary_path = Path(args.summary)
     if not summary_path.exists():
-        print(f"Error: {summary_path} not found.")
-        sys.exit(1)
-        
-    data = json.loads(summary_path.read_text())
+        print(f"Warning: {summary_path} not found. Generating failure fallback PDF.")
+        import datetime
+        data = {
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "overall_status": "CRITICAL (COLLECTION FAILED)",
+            "total_controls_checked": 0,
+            "pass_count": 0,
+            "fail_count": 1,
+            "warn_count": 0,
+            "evidence_sources": {
+                "aws": "failed",
+                "github": "failed",
+                "zoho": "failed"
+            },
+            "controls_matrix": [
+                {
+                    "id": "SYS.1",
+                    "name": "Audit Collection Pipeline",
+                    "status": "FAIL",
+                    "reason": "Pipeline crashed before JSON generation"
+                }
+            ]
+        }
+    else:
+        data = json.loads(summary_path.read_text())
     
     create_pdf(data, args.output)
     print(f"[PDF Gen] Created {args.output}")

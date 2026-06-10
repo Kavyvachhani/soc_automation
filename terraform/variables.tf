@@ -42,6 +42,14 @@ variable "existing_oidc_provider_arn" {
   default     = ""
 }
 
+# ─── Feature flags ─────────────────────────────────────────────────────────────
+
+variable "enable_worm" {
+  description = "When true, enables S3 Object Lock (GOVERNANCE mode) on the vault bucket."
+  type        = bool
+  default     = false
+}
+
 # ─── Secrets ───────────────────────────────────────────────────────────────────
 
 # Add compliance-specific secrets here if needed in the future.

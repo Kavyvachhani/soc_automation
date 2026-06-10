@@ -40,7 +40,7 @@ def load_latest_evidence(evidence_dir: Path, source: str) -> dict:
         return {}
 
 
-def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict) -> dict:
+def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dict) -> dict:
     """Evaluate overall compliance and map to SOC 2 criteria."""
     
     report = {
@@ -54,13 +54,14 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict) -> dict:
         "evidence_sources": {
             "aws": "collected" if aws_ev else "missing",
             "github": "collected" if github_ev else "missing",
-            "zoho": "collected" if zoho_ev else "missing"
+            "zoho": "collected" if zoho_ev else "missing",
+            "ai_pentest": "collected" if ai_ev else "missing"
         },
         "controls_matrix": []
     }
     
     # Check if we have evidence from all sources
-    if not aws_ev or not github_ev or not zoho_ev:
+    if not aws_ev or not github_ev or not zoho_ev or not ai_ev:
         report["overall_status"] = "FAIL"
         report["failed_controls"].append("Missing Evidence Sources")
     
@@ -69,6 +70,7 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict) -> dict:
     if aws_ev and "results" in aws_ev: all_results.extend(aws_ev["results"])
     if github_ev and "results" in github_ev: all_results.extend(github_ev["results"])
     if zoho_ev and "results" in zoho_ev: all_results.extend(zoho_ev["results"])
+    if ai_ev and "results" in ai_ev: all_results.extend(ai_ev["results"])
     
     report["total_controls_checked"] = len(all_results)
     
@@ -119,8 +121,9 @@ def main():
     aws_ev = load_latest_evidence(evidence_dir, "aws")
     github_ev = load_latest_evidence(evidence_dir, "github")
     zoho_ev = load_latest_evidence(evidence_dir, "zoho")
+    ai_ev = load_latest_evidence(evidence_dir, "ai")
     
-    report = evaluate_compliance(aws_ev, github_ev, zoho_ev)
+    report = evaluate_compliance(aws_ev, github_ev, zoho_ev, ai_ev)
     
     # Write summary report
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
