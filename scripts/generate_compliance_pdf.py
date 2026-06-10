@@ -6,6 +6,7 @@ Generates a professional, audit-ready PDF summary of the compliance posture.
 """
 
 import argparse
+import datetime
 import json
 import os
 import sys
