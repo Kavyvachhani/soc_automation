@@ -125,9 +125,80 @@ def create_pdf(summary_data: dict, output_path: str):
         pdf.cell(20, 8, status, border=1)
         pdf.set_text_color(33, 37, 41)
         
-        reason = str(ctrl.get("reason", ""))[:20] + ("..." if len(str(ctrl.get("reason", ""))) > 20 else "")
+        reason = str(ctrl.get("reason", ""))[:30] + ("..." if len(str(ctrl.get("reason", ""))) > 30 else "")
         pdf.cell(30, 8, reason, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         
+    pdf.ln(10)
+    
+    # Architecture Diagram Page
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "System Architecture & Endpoints", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 8, "Visual representation of the SOC 2 Compliance Data Flow:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(10)
+    
+    # FPDF Drawing Primitives for Diagram
+    
+    # Box 1: GitHub Actions (Central)
+    pdf.set_fill_color(241, 245, 249)
+    pdf.rect(80, 60, 50, 20, "DF")
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.text(85, 71, "GitHub Actions Pipeline")
+    
+    # Box 2: Zoho HR (Top Left)
+    pdf.set_fill_color(224, 242, 254)
+    pdf.rect(20, 30, 40, 15, "DF")
+    pdf.text(25, 38, "Zoho HR System")
+    
+    # Box 3: Shannon AI (Top Right)
+    pdf.set_fill_color(254, 226, 226)
+    pdf.rect(150, 30, 40, 15, "DF")
+    pdf.text(152, 38, "Shannon AI Pentest")
+    
+    # Box 4: AWS Environment (Bottom Block)
+    pdf.set_fill_color(248, 250, 252)
+    pdf.rect(20, 110, 170, 50, "DF")
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.text(25, 120, "AWS Cloud Infrastructure")
+    
+    # Inside AWS
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(30, 130, 35, 20, "DF")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.text(35, 141, "IAM & Roles")
+    
+    pdf.rect(75, 130, 35, 20, "DF")
+    pdf.text(78, 141, "CloudTrail/Watch")
+    
+    pdf.set_fill_color(209, 250, 229)
+    pdf.rect(120, 130, 60, 20, "DF")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.text(125, 141, "S3 Evidence Vault (WORM)")
+    
+    # Lines & Arrows
+    pdf.set_line_width(0.5)
+    
+    # Zoho to GitHub
+    pdf.line(40, 45, 80, 65)
+    pdf.text(50, 58, "Policies")
+    
+    # Shannon to GitHub
+    pdf.line(170, 45, 130, 65)
+    pdf.text(145, 58, "Vuln Reports")
+    
+    # GitHub to AWS Vault
+    pdf.line(105, 80, 150, 130)
+    pdf.text(130, 105, "Upload Evidence")
+    
+    # GitHub to AWS APIs
+    pdf.line(105, 80, 50, 130)
+    pdf.text(60, 105, "Audit Configurations")
+    
+    pdf.ln(120)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.cell(0, 10, "Diagram: Automated evidence collection routing technical and non-technical artifacts into the secure AWS Vault.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
     # Footer function implicitly adds page numbers if we subclass, but simple generation here
     output_bytes = bytes(pdf.output())
     with open(output_path, "wb") as f:
