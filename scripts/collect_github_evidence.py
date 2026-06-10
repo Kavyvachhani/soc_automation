@@ -60,7 +60,7 @@ class GitHubAPIClient:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
-            if e.code == 404:
+            if e.code in (403, 404):
                 return None
             raise RuntimeError(f"GitHub API {path} → {e.code}: {e.read().decode(errors='replace')[:300]}")
         except Exception as e:
