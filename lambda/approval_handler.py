@@ -50,8 +50,15 @@ ses = boto3.client("ses") if ENABLE_SES else None
 
 def s3_get_json(key: str) -> dict:
     """Download and parse a JSON file from S3."""
-    resp = s3.get_object(Bucket=S3_BUCKET, Key=key)
-    return json.loads(resp["Body"].read().decode("utf-8"))
+    import botocore
+    try:
+        resp = s3.get_object(Bucket=S3_BUCKET, Key=key)
+        return json.loads(resp["Body"].read().decode("utf-8"))
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise Exception(f"NoSuchKey: {key} not found in {S3_BUCKET}")
+        raise
+
 
 
 def s3_put_json(key: str, data: dict) -> None:
@@ -734,8 +741,25 @@ def handler(event, context):
                 "body": html_error(f"This approval has already been processed (status: {pending.get('status')})."),
             }
 
-        # Load employee data
-        employee_data = s3_get_json(f"{prefix}/employee.json")
+        # Load employee data — fall back to pending-approval fields if missing
+        try:
+            employee_data = s3_get_json(f"{prefix}/employee.json")
+        except Exception as fetch_err:
+            print(f"[approval_handler] employee.json not found ({fetch_err}); using fallback data from pending-approval.json")
+            employee_data = {
+                "emp_id": emp_id,
+                "name": pending.get("employee_name", "Unknown Employee"),
+                "designation": pending.get("designation", "Employee"),
+                "team": pending.get("team", "Engineering"),
+                "employment_type": "full-time",
+                "experience_level": pending.get("experience_level", "fresher"),
+                "start_date": now_utc()[:10],
+                "confidence": 0.0,
+                "source_file": "synthetic-fallback",
+            }
+            # Persist synthetic employee.json so subsequent steps work
+            s3_put_json(f"{prefix}/employee.json", employee_data)
+
         name = employee_data.get("name", "Unknown")
         exp_level = employee_data.get("experience_level", "fresher")
         role_key = "experienced" if exp_level == "experienced" else "fresher"

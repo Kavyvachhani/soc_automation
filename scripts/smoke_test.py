@@ -148,15 +148,40 @@ except Exception as e:
 # ── Invoke approval-handler Lambda ────────────────────────────────────────────
 print("\n=== 5. Invoke attest-approval-handler Lambda (approve) ===")
 if not token:
-    import uuid
+    import uuid, datetime
     token = str(uuid.uuid4())
     s3.put_object(
         Bucket=BUCKET,
         Key=f"{PREFIX}/pending-approval.json",
-        Body=json.dumps({"emp_id": EMP_ID, "token": token, "status": "pending"}).encode(),
+        Body=json.dumps({"emp_id": EMP_ID, "token": token, "status": "pending",
+                         "employee_name": "Smoke Test Employee"}).encode(),
         ContentType="application/json",
     )
     info("Created synthetic pending-approval.json")
+    # Ensure employee.json exists so the approval Lambda can provision
+    try:
+        s3.head_object(Bucket=BUCKET, Key=f"{PREFIX}/employee.json")
+        info("employee.json already exists in S3")
+    except Exception:
+        synthetic_emp = {
+            "emp_id": EMP_ID,
+            "name": "Smoke Test Employee",
+            "designation": "QA Engineer",
+            "team": "Engineering",
+            "employment_type": "full-time",
+            "experience_level": "fresher",
+            "start_date": datetime.date.today().isoformat(),
+            "confidence": 1.0,
+            "source_file": "synthetic-smoke-test",
+            "extracted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        s3.put_object(
+            Bucket=BUCKET,
+            Key=f"{PREFIX}/employee.json",
+            Body=json.dumps(synthetic_emp, indent=2).encode(),
+            ContentType="application/json",
+        )
+        ok("Created synthetic employee.json for smoke test")
 
 approval_event = {
     "queryStringParameters": {

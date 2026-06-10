@@ -45,6 +45,7 @@ st.set_page_config(
 # ─── Session state bootstrap ──────────────────────────────────────────────────
 
 _DEFAULTS = {
+    "flow": "onboarding",
     "step": "upload",
     "emp_id": None,
     "employee_data": None,
@@ -572,12 +573,29 @@ def render_sidebar() -> None:
         st.caption("SOC 2 Onboarding Evidence Platform")
         st.divider()
 
-        steps = [
-            ("upload",  "Upload Offer Letter"),
-            ("sign",    "Sign NDA & Policies"),
-            ("approve", "Tech Lead Approval"),
-            ("done",    "Evidence Collected"),
-        ]
+        flow = st.radio("Workflow", ["Onboarding", "Offboarding"], index=0 if st.session_state.flow == "onboarding" else 1)
+        if flow.lower() != st.session_state.flow:
+            for k in list(st.session_state.keys()):
+                if k != "flow": del st.session_state[k]
+            st.session_state.flow = flow.lower()
+            st.session_state.step = "upload" if flow == "Onboarding" else "offboard_init"
+            st.rerun()
+
+        if st.session_state.flow == "onboarding":
+            steps = [
+                ("upload",  "Upload Offer Letter"),
+                ("sign",    "Sign NDA & Policies"),
+                ("approve", "Tech Lead Approval"),
+                ("done",    "Evidence Collected"),
+            ]
+        else:
+            steps = [
+                ("offboard_init", "Initiate Offboarding"),
+                ("offboard_audit", "Audit & Backup"),
+                ("offboard_approve", "Manager Verification"),
+                ("offboard_done", "Access Revoked"),
+            ]
+            
         current = st.session_state.step
 
         for key, label in steps:
@@ -1209,7 +1227,9 @@ def step_sign() -> None:
 
             # Copy signed-nda.pdf into the expected location
             import shutil
-            shutil.copy(signed_nda, str(d / "signed-nda.pdf"))
+            target_nda = str(d / "signed-nda.pdf")
+            if str(signed_nda) != target_nda:
+                shutil.copy(signed_nda, target_nda)
 
             # Save audit trail
             (d / "nda-audit-trail.json").write_text(json.dumps(audit_trail, indent=2))
@@ -1510,8 +1530,212 @@ def step_done() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# UI — Offboarding Flow
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def step_offboard_init() -> None:
+    st.header("Offboarding Step 1 — Initiate")
+    st.write("Enter the Employee ID to begin the offboarding and access revocation process.")
+    
+    with st.form("offboard_init_form"):
+        emp_id = st.text_input("Employee ID", placeholder="e.g. EMP-12345678")
+        submit = st.form_submit_button("Fetch Employee Data", type="primary")
+        
+        if submit:
+            if not emp_id.strip():
+                st.error("Please enter an Employee ID.")
+                return
+            emp_id = emp_id.strip().upper()
+            
+            with st.spinner("Fetching data from vault..."):
+                d = get_emp_dir(emp_id)
+                emp_data = None
+                
+                # Fetch locally or from S3
+                if MOCK_MODE:
+                    if (d / "employee.json").exists():
+                        emp_data = json.loads((d / "employee.json").read_text())
+                else:
+                    import boto3
+                    s3 = boto3.client("s3")
+                    try:
+                        r = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/employee.json")
+                        emp_data = json.loads(r["Body"].read())
+                    except Exception as e:
+                        pass
+                
+                if emp_data:
+                    st.session_state.emp_id = emp_id
+                    st.session_state.employee_data = emp_data
+                    st.session_state.step = "offboard_audit"
+                    st.rerun()
+                else:
+                    st.error(f"Employee {emp_id} not found in the evidence vault.")
+
+def step_offboard_audit() -> None:
+    st.header("Offboarding Step 2 — Audit & Backup")
+    
+    emp_id = st.session_state.emp_id
+    data = st.session_state.employee_data or {}
+    
+    st.info(f"Auditing active access for **{data.get('name', emp_id)}**...")
+    
+    col1, col2 = st.columns(2)
+    col1.metric("Name", data.get("name", "—"))
+    col2.metric("Role", data.get("designation", "—"))
+    
+    if "offboard_audit_result" not in st.session_state:
+        with st.spinner("Querying AWS IAM for active sessions and keys..."):
+            import offboarding_utils
+            audit = offboarding_utils.get_employee_access_audit(emp_id, data)
+            st.session_state.offboard_audit_result = audit
+            
+            # Save backup of current state
+            d = get_emp_dir(emp_id)
+            backup = {
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "employee_data": data,
+                "audit": audit
+            }
+            (d / "offboard-backup.json").write_text(json.dumps(backup, indent=2))
+            if not MOCK_MODE:
+                import boto3
+                s3 = boto3.client("s3")
+                s3.put_object(
+                    Bucket=BUCKET_NAME,
+                    Key=f"employees/{emp_id}/offboard-backup.json",
+                    Body=json.dumps(backup, indent=2).encode(),
+                    ContentType="application/json"
+                )
+    
+    audit = st.session_state.offboard_audit_result
+    st.subheader("Active Access Detected")
+    st.write(f"**IAM Username:** `{audit.get('iam_username')}`")
+    st.write(f"**Console Access:** {'Yes' if audit.get('console_access') else 'No'}")
+    st.write(f"**MFA Enabled:** {'Yes' if audit.get('mfa_enabled') else 'No'}")
+    
+    st.write("**Policies Attached:**")
+    for p in audit.get("policies", []):
+        st.code(p)
+        
+    st.write("**Access Keys:**")
+    for k in audit.get("access_keys", []):
+        st.code(k)
+        
+    st.divider()
+    if st.button("Request Manager Approval for Wipe", type="primary"):
+        # Create pending-offboard.json
+        req = {
+            "emp_id": emp_id,
+            "employee_name": data.get("name"),
+            "status": "pending",
+            "requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "audit": audit
+        }
+        
+        d = get_emp_dir(emp_id)
+        (d / "pending-offboard.json").write_text(json.dumps(req, indent=2))
+        
+        if not MOCK_MODE:
+            import boto3
+            s3 = boto3.client("s3")
+            s3.put_object(
+                Bucket=BUCKET_NAME,
+                Key=f"employees/{emp_id}/pending-offboard.json",
+                Body=json.dumps(req, indent=2).encode(),
+                ContentType="application/json"
+            )
+            
+        st.session_state.step = "offboard_approve"
+        st.rerun()
+
+def step_offboard_approve() -> None:
+    st.header("Offboarding Step 3 — Manager Verification")
+    
+    emp_id = st.session_state.emp_id
+    d = get_emp_dir(emp_id)
+    
+    # Check status
+    status = "pending"
+    approver = ""
+    if MOCK_MODE:
+        if (d / "pending-offboard.json").exists():
+            req = json.loads((d / "pending-offboard.json").read_text())
+            status = req.get("status", "pending")
+            approver = req.get("approved_by", "")
+    else:
+        import boto3
+        s3 = boto3.client("s3")
+        try:
+            r = s3.get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/pending-offboard.json")
+            req = json.loads(r["Body"].read())
+            status = req.get("status", "pending")
+            approver = req.get("approved_by", "")
+        except Exception:
+            pass
+            
+    if status == "approved":
+        st.success(f"✅ Offboarding approved by {approver}. Commencing secure data wipe...")
+        
+        if st.button("Execute Data Wipe & Revoke Access", type="primary"):
+            with st.spinner("Deleting AWS IAM resources and generating report..."):
+                import offboarding_utils
+                revocation = offboarding_utils.revoke_employee_access(emp_id, st.session_state.employee_data)
+                
+                # Generate report
+                out_path = d / "offboarding-report.pdf"
+                offboarding_utils.generate_offboarding_report(
+                    emp_id, 
+                    st.session_state.employee_data, 
+                    st.session_state.offboard_audit_result, 
+                    revocation, 
+                    approver, 
+                    str(out_path)
+                )
+                
+                if not MOCK_MODE:
+                    s3.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=f"employees/{emp_id}/offboarding-report.pdf",
+                        Body=out_path.read_bytes(),
+                        ContentType="application/pdf"
+                    )
+                
+                st.session_state.revocation_result = revocation
+                st.session_state.step = "offboard_done"
+                st.rerun()
+                
+    elif status == "rejected":
+        st.error("❌ Offboarding request was rejected by the manager.")
+    else:
+        st.warning("⏳ Waiting for manager approval via the Manager Mailbox (Port 8002).")
+        if st.button("🔄 Check Status"):
+            st.rerun()
+
+def step_offboard_done() -> None:
+    st.header("Offboarding Complete 🎉")
+    st.success("SOC 2 Data Wipe and Access Revocation completed successfully.")
+    
+    rev = st.session_state.revocation_result
+    st.write("### Actions Performed")
+    for act in rev.get("actions", []):
+        st.markdown(f"- ✅ {act}")
+        
+    d = get_emp_dir(st.session_state.emp_id)
+    if (d / "offboarding-report.pdf").exists():
+        with open(d / "offboarding-report.pdf", "rb") as fh:
+            st.download_button(
+                "📥 Download Offboarding Compliance Report (PDF)",
+                fh,
+                file_name="offboarding-report.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 render_sidebar()
 
@@ -1524,7 +1748,15 @@ elif _step == "approve":
     step_approve()
 elif _step == "done":
     step_done()
+elif _step == "offboard_init":
+    step_offboard_init()
+elif _step == "offboard_audit":
+    step_offboard_audit()
+elif _step == "offboard_approve":
+    step_offboard_approve()
+elif _step == "offboard_done":
+    step_offboard_done()
 else:
     st.error(f"Unknown step: {_step!r}")
-    st.session_state.step = "upload"
+    st.session_state.step = "upload" if st.session_state.flow == "onboarding" else "offboard_init"
     st.rerun()

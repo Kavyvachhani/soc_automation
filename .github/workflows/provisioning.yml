@@ -69,7 +69,7 @@ jobs:
               'emp_id':     '$EMP_ID',
               'token':      '$TOKEN',
               'status':     'pending',
-              'created_at': datetime.datetime.utcnow().isoformat() + 'Z'
+              'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat() + 'Z'
           }
           s3.put_object(
               Bucket='$BUCKET',
@@ -78,6 +78,33 @@ jobs:
               ContentType='application/json'
           )
           print('Created pending-approval.json')
+          PYEOF
+
+            # Seed a synthetic employee.json if it does not already exist
+            aws s3api head-object --bucket "$BUCKET" --key "employees/${EMP_ID}/employee.json" \
+              --no-cli-pager 2>/dev/null \
+            || python3 << PYEOF
+          import json, boto3, datetime
+          s3 = boto3.client('s3', region_name='${{ secrets.AWS_REGION }}')
+          emp = {
+              'emp_id':           '$EMP_ID',
+              'name':             'Manual Dispatch Employee',
+              'designation':      'Engineer',
+              'team':             'Engineering',
+              'employment_type':  'full-time',
+              'experience_level': 'fresher',
+              'start_date':       datetime.date.today().isoformat(),
+              'confidence':       0.5,
+              'source_file':      'synthetic-workflow-dispatch',
+              'extracted_at':     datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          }
+          s3.put_object(
+              Bucket='$BUCKET',
+              Key=f"employees/$EMP_ID/employee.json",
+              Body=json.dumps(emp, indent=2).encode(),
+              ContentType='application/json'
+          )
+          print('Seeded synthetic employee.json')
           PYEOF
           fi
 
