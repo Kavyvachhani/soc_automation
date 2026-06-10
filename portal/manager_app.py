@@ -199,7 +199,7 @@ with st.sidebar:
     st.title("📬 Manager Mailbox")
     st.caption("Review & Approve Access Requests")
     st.divider()
-    badge = "🟡 MOCK MODE" if MOCK_MODE else "🟢 LIVE MODE"
+    badge = "🟢 LOCAL EXECUTION" if MOCK_MODE else "🟢 AWS CLOUD MODE"
     st.info(f"**{badge}**")
     if st.button("🔄 Refresh Mailbox", use_container_width=True):
         st.rerun()

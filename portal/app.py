@@ -610,7 +610,7 @@ def render_sidebar() -> None:
                 st.markdown(f"◻ {label}")
 
         st.divider()
-        badge = "🟡 MOCK MODE" if MOCK_MODE else "🟢 LIVE MODE"
+        badge = "🟢 LOCAL EXECUTION MODE" if MOCK_MODE else "🟢 AWS CLOUD MODE"
         detail = "Local filesystem · no cloud required" if MOCK_MODE else "S3 · Lambda · GitHub Actions"
         st.info(f"**{badge}**\n\n{detail}")
 
