@@ -184,56 +184,79 @@ def load_policy_text(policy: dict, nda_text: str | None = None) -> str:
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-html,body,[class*="css"]{font-family:'Inter',-apple-system,sans-serif!important}
-#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stStatusWidget"]{display:none!important}
-[data-testid="stAppViewContainer"],[data-testid="stMain"],.main .block-container{background-color:#0d0f17!important}
-[data-testid="stAppViewContainer"]{background-image:radial-gradient(ellipse 70% 50% at 85% -5%,rgba(99,102,241,.22) 0%,transparent 55%),radial-gradient(ellipse 50% 35% at 0% 100%,rgba(59,130,246,.12) 0%,transparent 55%)!important}
-.block-container{padding-top:3rem!important;padding-bottom:4rem!important;max-width:920px!important}
-[data-testid="stSidebar"]{background:#080a10!important;border-right:1px solid rgba(255,255,255,.06)!important}
-[data-testid="stSidebar"] *{color:#c9cfe0!important}
-h1,h2,h3,h4{color:#f0f2ff!important;font-weight:700!important;letter-spacing:-.02em!important}
-p,.stMarkdown p{color:#a8b0c8!important;line-height:1.65!important}
-.stMarkdown strong{color:#e2e5f0!important}
-code{background:rgba(99,102,241,.12)!important;color:#a5b4fc!important;border-radius:4px!important;padding:2px 6px!important}
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Outfit', sans-serif !important; }
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #0b0f19 !important; }
+
+/* Stunning background glow */
+[data-testid="stAppViewContainer"] {
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.1), transparent 25%) !important;
+}
+
+.block-container { padding-top: 3rem !important; padding-bottom: 4rem !important; max-width: 960px !important; }
+
+/* Glass Sidebar */
+[data-testid="stSidebar"] {
+    background: rgba(11, 15, 25, 0.6) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border-right: 1px solid rgba(255,255,255,0.05) !important;
+}
+[data-testid="stSidebar"] * { color: #d1d5db !important; }
+
+h1, h2, h3, h4 { color: #f3f4f6 !important; font-weight: 700 !important; letter-spacing: -0.03em !important; }
+p, .stMarkdown p { color: #9ca3af !important; line-height: 1.7 !important; }
+
 /* Step header */
-.step-header{display:flex;align-items:center;gap:14px;margin-bottom:1.6rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.07)}
-.step-num{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#3b82f6);font-weight:700;font-size:17px;color:#fff;flex-shrink:0;box-shadow:0 0 20px rgba(79,70,229,.55)}
-.step-title{color:#f0f2ff!important;font-size:1.5rem;font-weight:700;margin:0}
-.step-sub{color:#8b92a8;font-size:.85rem;margin-top:3px}
+.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #ec4899); font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 0 25px rgba(99, 102, 241, 0.4); }
+.step-title { color: #f3f4f6 !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
+.step-sub { color: #9ca3af; font-size: 0.9rem; margin-top: 4px; }
+
 /* Sidebar steps */
-.sb-step{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:2px;font-size:.875rem}
-.sb-step-done{color:#4ade80!important}
-.sb-step-active{background:rgba(79,70,229,.2);color:#a5b4fc!important;font-weight:600;border-left:3px solid #6366f1}
-.sb-step-todo{color:#4a5170!important}
-/* Containers */
-[data-testid="stVerticalBlockBorderWrapper"]{background:rgba(15,17,28,.85)!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:14px!important}
-/* Metrics */
-[data-testid="stMetric"]{background:rgba(15,17,28,.9)!important;border:1px solid rgba(255,255,255,.08)!important;border-radius:10px!important;padding:14px 16px!important}
-[data-testid="stMetricLabel"]{color:#8b92a8!important;font-size:.76rem!important;text-transform:uppercase;letter-spacing:.05em}
-[data-testid="stMetricValue"]{color:#f0f2ff!important;font-size:1.1rem!important;font-weight:600!important}
-/* Alerts */
-[data-testid="stAlert"]{border-radius:10px!important;border-width:1px!important}
-/* Primary buttons */
-.stButton>button{background:linear-gradient(135deg,#4f46e5 0%,#3b82f6 100%)!important;color:#fff!important;border:none!important;border-radius:9px!important;font-weight:600!important;font-size:.9rem!important;padding:10px 22px!important;box-shadow:0 4px 14px rgba(79,70,229,.35)!important;transition:all .2s ease!important}
-.stButton>button:hover{transform:translateY(-2px)!important;box-shadow:0 6px 20px rgba(79,70,229,.55)!important}
-/* Download buttons */
-[data-testid="stDownloadButton"]>button{background:rgba(20,22,38,.9)!important;border:1px solid rgba(99,102,241,.35)!important;color:#a5b4fc!important;box-shadow:none!important;font-size:.82rem!important}
-[data-testid="stDownloadButton"]>button:hover{background:rgba(79,70,229,.15)!important;border-color:rgba(99,102,241,.6)!important;color:#c7d2fe!important;transform:translateY(-1px)!important}
-/* File uploader */
-[data-testid="stFileUploader"]{background:rgba(15,17,28,.8)!important;border:2px dashed rgba(99,102,241,.3)!important;border-radius:12px!important}
-/* Text inputs */
-[data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea{background:rgba(15,17,28,.9)!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:8px!important;color:#f0f2ff!important}
-[data-testid="stTextInput"] input:focus,[data-testid="stTextArea"] textarea:focus{border-color:rgba(99,102,241,.6)!important;box-shadow:0 0 0 2px rgba(99,102,241,.15)!important}
-/* Tabs */
-[data-testid="stTabs"] [data-testid="stTab"]{color:#8b92a8!important;font-size:.85rem!important}
-[data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"]{color:#a5b4fc!important;border-bottom-color:#6366f1!important}
-/* Expander */
-[data-testid="stExpander"]{background:rgba(15,17,28,.8)!important;border:1px solid rgba(255,255,255,.07)!important;border-radius:10px!important}
-/* Checkbox */
-[data-testid="stCheckbox"] label{color:#c9cfe0!important;font-size:.88rem!important}
-hr{border-color:rgba(255,255,255,.07)!important;margin:1.2rem 0!important}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; margin-bottom: 4px; font-size: 0.9rem; transition: all 0.3s ease; }
+.sb-step-done { color: #34d399 !important; }
+.sb-step-active { background: rgba(99, 102, 241, 0.15); color: #818cf8 !important; font-weight: 600; border-left: 4px solid #818cf8; transform: translateX(4px); }
+.sb-step-todo { color: #4b5563 !important; }
+
+/* Glass Containers & Metrics */
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
+    background: rgba(17, 24, 39, 0.7) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 16px !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.4) !important; }
+
+/* Buttons */
+.stButton>button {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
+    color: #ffffff !important; border: none !important; border-radius: 12px !important;
+    font-weight: 600 !important; font-size: 0.95rem !important; padding: 12px 24px !important;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4) !important; transition: all 0.2s ease !important;
+}
+.stButton>button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(168, 85, 247, 0.5) !important; filter: brightness(1.1); }
+
+/* Download Buttons */
+[data-testid="stDownloadButton"]>button {
+    background: rgba(31, 41, 55, 0.8) !important;
+    border: 1px solid rgba(139, 92, 246, 0.4) !important;
+    color: #c4b5fd !important; box-shadow: none !important; border-radius: 10px !important;
+}
+[data-testid="stDownloadButton"]>button:hover { background: rgba(139, 92, 246, 0.15) !important; border-color: rgba(139, 92, 246, 0.8) !important; transform: translateY(-1px) !important; color: #ddd6fe !important; }
+
+/* Form inputs */
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
+    background: rgba(17, 24, 39, 0.8) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; color: #f3f4f6 !important;
+}
+[data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
+    border-color: #818cf8 !important; box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2) !important;
+}
 </style>
 """
 
@@ -681,16 +704,33 @@ def step_offboard_audit() -> None:
     if not _api_guard(): return
     data = st.session_state.employee_data or {}
     with st.container(border=True):
-        st.metric("Name", data.get("name","—")); st.metric("Role", data.get("designation","—"))
+        st.metric("Name", data.get("name","—"))
+        st.metric("Role", data.get("designation","—"))
     st.info("IAM audit is performed server-side. Submit below to request manager approval.")
     if st.button("Request Manager Approval →", type="primary"):
-        st.session_state.step = "offboard_approve"; st.rerun()
+        try:
+            _api("POST", "/portal/offboard-request", body={"emp_id": st.session_state.emp_id, "employee_data": data})
+            st.session_state.step = "offboard_approve"
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to submit request: {e}")
 
 def step_offboard_approve() -> None:
     _step_header(3, "Manager Verification", "Waiting for manager to approve the access wipe.")
     if not _api_guard(): return
     st.warning("⏳ Waiting for manager approval via the Manager Portal (Port 8502).")
-    if st.button("🔄 Refresh"): st.rerun()
+    
+    try:
+        r = _api("GET", f"/portal/status?emp_id={st.session_state.emp_id}")
+        if r.get("approval", {}).get("status") == "approved":
+            st.session_state.step = "offboard_done"
+            st.rerun()
+        elif r.get("approval", {}).get("status") == "rejected":
+            st.error("Offboarding request was rejected by the manager.")
+    except Exception:
+        pass
+        
+    if st.button("🔄 Refresh Status"): st.rerun()
 
 def step_offboard_done() -> None:
     _step_header(4, "Offboarding Complete", "Access revoked and compliance evidence archived.")

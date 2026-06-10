@@ -132,7 +132,11 @@ def get_status(event: dict) -> dict:
         r = s3.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/pending-approval.json")
         result["approval"] = json.loads(r["Body"].read())
     except ClientError:
-        result["approval"] = None
+        try:
+            r = s3.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/pending-offboard.json")
+            result["approval"] = json.loads(r["Body"].read())
+        except ClientError:
+            result["approval"] = None
 
     return ok(result)
 
@@ -288,6 +292,41 @@ def list_pending(event: dict) -> dict:
         return err(str(e), 500)
 
 
+def initiate_offboard(event: dict) -> dict:
+    """
+    POST /portal/offboard-request
+    Body: { emp_id, employee_data }
+    Writes pending-offboard.json to S3.
+    """
+    body = json.loads(event.get("body") or "{}")
+    emp_id = body.get("emp_id", "")
+    employee_data = body.get("employee_data", {})
+    
+    if not emp_id:
+        return err("emp_id required")
+        
+    key = f"employees/{emp_id}/pending-offboard.json"
+    pending = {
+        "emp_id": emp_id,
+        "employee_name": employee_data.get("name", "Unknown"),
+        "designation": employee_data.get("designation", "Employee"),
+        "status": "pending",
+        "requested_at": now_utc(),
+        "type": "offboarding"
+    }
+    
+    try:
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=key,
+            Body=json.dumps(pending, indent=2).encode(),
+            ContentType="application/json"
+        )
+        return ok({"emp_id": emp_id, "status": "pending"})
+    except Exception as e:
+        return err(f"S3 error: {e}", 500)
+
+
 def get_upload_url_for_signed(event: dict) -> dict:
     """
     POST /portal/signed-upload-url
@@ -361,5 +400,6 @@ def handler(event: dict, context) -> dict:
     if path.endswith("/evidence")          and method == "GET":  return get_evidence(event)
     if path.endswith("/approve")           and method == "POST": return manager_approve(event)
     if path.endswith("/pending")           and method == "GET":  return list_pending(event)
+    if path.endswith("/offboard-request")  and method == "POST": return initiate_offboard(event)
 
     return err(f"No route: {method} {path}", 404)

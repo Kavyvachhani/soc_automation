@@ -252,7 +252,9 @@ def create_iam_user(employee_data: dict, role_key: str, emp_id: str) -> dict:
         "policies_attached": [],
         "access_key_id": "None",
         "secret_access_key": "None",
-        "temp_password": "None"
+        "temp_password": "None",
+        "zoho_email": "None",
+        "zoho_temp_password": "None"
     }
 
     try:
@@ -286,6 +288,12 @@ def create_iam_user(employee_data: dict, role_key: str, emp_id: str) -> dict:
         result["temp_password"] = temp_password
         print(f"[IAM] Console login created (password reset required)")
 
+        # Create Zoho Mail (simulated for SOC 2)
+        zoho_email = f"{username}@attest-security.com"
+        result["zoho_email"] = zoho_email
+        result["zoho_temp_password"] = temp_password
+        print(f"[ZOHO MAIL] Provisioned mailbox: {zoho_email}")
+
         # Create access key
         key_resp = iam.create_access_key(UserName=username)
         result["access_key_id"] = key_resp["AccessKey"]["AccessKeyId"]
@@ -317,7 +325,9 @@ def mock_provision(employee_data: dict, role_key: str, emp_id: str) -> dict:
         "secret_access_key": "MOCK_SECRET_KEY_ICxrD/qppenl94PY5LvfRsJ4",
         "temp_password": "MockPassword123!A1",
         "console_login": True,
-        "password_reset_required": True
+        "password_reset_required": True,
+        "zoho_email": f"{username}@attest-security.com",
+        "zoho_temp_password": "MockPassword123!A1"
     }
 
 
@@ -456,7 +466,7 @@ def generate_onboarding_report_pdf(
     
     # Credentials Section
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 6, "AWS Account Credentials Details", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, "AWS & Corporate Access Details", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(35, 5, "IAM Username:")
     pdf.cell(135, 5, str(credentials_data.get("username")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -464,6 +474,8 @@ def generate_onboarding_report_pdf(
     pdf.cell(135, 5, str(credentials_data.get("console_url")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(35, 5, "Access Key ID:")
     pdf.cell(135, 5, str(credentials_data.get("access_key_id")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(35, 5, "Corporate Email:")
+    pdf.cell(135, 5, str(credentials_data.get("zoho_email")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
     pdf.ln(2)
     pdf.set_fill_color(254, 243, 199) # warning background color
@@ -535,6 +547,8 @@ def build_evidence(emp_id: str, employee_data: dict, role_key: str, approver: st
         "temporary_password": iam_result.get("temp_password", "PasswordResetRequired"),
         "access_key_id": iam_result.get("access_key_id", "None"),
         "secret_access_key": iam_result.get("secret_access_key", "None"),
+        "zoho_mail": iam_result.get("zoho_email", "None"),
+        "zoho_temp_password": iam_result.get("zoho_temp_password", "None"),
         "mfa_required": "true",
         "mfa_instructions": "Download Google Authenticator, log in to Console, go to My Security Credentials -> Assign MFA Device."
     }]
@@ -565,6 +579,7 @@ def build_evidence(emp_id: str, employee_data: dict, role_key: str, approver: st
         "access_key_id": iam_result.get("access_key_id"),
         "timestamp": ts,
         "ip": employee_data.get("ip_address", "127.0.0.1"),
+        "zoho_email": iam_result.get("zoho_email"),
     }
     
     try:

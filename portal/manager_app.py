@@ -37,46 +37,58 @@ st.set_page_config(
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-html, body, [class*="css"], .stMarkdown, p, span, label, div {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-}
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
-[data-testid="stStatusWidget"] { display: none !important; }
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Outfit', sans-serif !important; }
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #0b0f19 !important; }
 
-[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container {
-    background-color: #0d0f17 !important;
-}
+/* Stunning background glow */
 [data-testid="stAppViewContainer"] {
-    background-image: radial-gradient(ellipse 60% 40% at 85% 0%, rgba(99,102,241,0.15) 0%, transparent 60%) !important;
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.1), transparent 25%) !important;
 }
-.block-container { padding-top: 2.5rem !important; max-width: 900px !important; }
-[data-testid="stSidebar"] {
-    background: #080a10 !important;
-    border-right: 1px solid rgba(255,255,255,0.06) !important;
+
+.block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1000px !important; }
+
+h1, h2, h3, h4 { color: #f3f4f6 !important; font-weight: 700 !important; letter-spacing: -0.03em !important; }
+p, .stMarkdown p { color: #9ca3af !important; line-height: 1.7 !important; }
+
+/* Glass Containers & Metrics */
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
+    background: rgba(17, 24, 39, 0.7) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 16px !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
 }
-[data-testid="stSidebar"] * { color: #c9cfe0 !important; }
-h1, h2, h3, h4 { color: #f0f2ff !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
-p, .stMarkdown p { color: #a8b0c8 !important; }
-.stMarkdown strong { color: #e2e5f0 !important; }
-[data-testid="stAlert"] { border-radius: 10px !important; border-width: 1px !important; }
-[data-testid="stVerticalBlockBorderWrapper"] {
-    background: rgba(17,19,31,0.85) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
-    border-radius: 14px !important;
+[data-testid="stVerticalBlockBorderWrapper"]:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.4) !important; }
+
+/* Buttons */
+.stButton>button {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
+    color: #ffffff !important; border: none !important; border-radius: 12px !important;
+    font-weight: 600 !important; font-size: 0.95rem !important; padding: 12px 24px !important;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4) !important; transition: all 0.2s ease !important;
 }
-.stButton > button {
-    background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important;
-    color: #fff !important; border: none !important; border-radius: 9px !important;
-    font-weight: 600 !important; font-size: 0.88rem !important;
-    box-shadow: 0 4px 14px rgba(79,70,229,0.35) !important;
-    transition: all 0.2s ease !important;
+.stButton>button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(168, 85, 247, 0.5) !important; filter: brightness(1.1); }
+
+/* Reject Button Variant */
+.reject-btn button {
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
 }
-.stButton > button:hover { transform: translateY(-2px) !important; box-shadow: 0 6px 20px rgba(79,70,229,0.5) !important; }
-hr { border-color: rgba(255,255,255,0.07) !important; }
-[data-testid="stMetric"] { background: rgba(15,17,28,0.9) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius:10px !important; padding:14px 16px !important; }
-[data-testid="stMetricLabel"] { color: #8b92a8 !important; font-size: 0.76rem !important; text-transform:uppercase; letter-spacing:0.05em; }
-[data-testid="stMetricValue"] { color: #f0f2ff !important; font-size: 1.05rem !important; font-weight:600 !important; }
+
+/* Download Buttons */
+[data-testid="stDownloadButton"]>button {
+    background: rgba(31, 41, 55, 0.8) !important;
+    border: 1px solid rgba(139, 92, 246, 0.4) !important;
+    color: #c4b5fd !important; box-shadow: none !important; border-radius: 10px !important;
+}
+[data-testid="stDownloadButton"]>button:hover { background: rgba(139, 92, 246, 0.15) !important; border-color: rgba(139, 92, 246, 0.8) !important; transform: translateY(-1px) !important; color: #ddd6fe !important; }
+
+hr { border-color: rgba(255,255,255,0.07) !important; margin: 1.5rem 0 !important; }
 </style>
 """
 
