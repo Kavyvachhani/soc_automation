@@ -212,3 +212,4 @@ def dispatch_to_github(emp_id: str) -> None:
         body = exc.read().decode(errors="replace")
         print(f"[signed_processor] GitHub dispatch failed: {exc.code} {body}")
         # Don't raise — email approval is the primary path now
+# deployed: 2026-06-10T00:19:31Z

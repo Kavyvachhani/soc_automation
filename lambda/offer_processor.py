@@ -337,3 +337,4 @@ def process_offer_letter_local(pdf_path, emp_id, data_dir):
     pdf_bytes_out = render_nda_pdf(nda_text)
     (emp_dir / "nda-unsigned.pdf").write_bytes(pdf_bytes_out)
     print(f"[Local Offer Processor] Processed {emp_id} successfully.")
+# deployed: 2026-06-10T00:19:31Z
