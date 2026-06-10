@@ -476,7 +476,7 @@ jobs:
           print(f"  Critical CVEs (deps):      {crit_cves}")
           print(f"  Secrets detected:          {secrets}")
           print(f"  Total critical findings:   {total_critical}")
-          print(f"  S3 report:  s3://${{os.getenv('AWS_S3_BUCKET','bucket')}}/{os.getenv('S3_KEY','')}/")
+          print(f"  S3 report:  s3://{os.getenv('AWS_S3_BUCKET','bucket')}/{os.getenv('S3_KEY','')}/")
           print(f"{'='*60}\n")
 
           if secrets > 0:
