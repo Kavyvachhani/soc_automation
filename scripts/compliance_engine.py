@@ -152,8 +152,9 @@ def main():
     if args.upload and args.bucket:
         import boto3
         s3 = boto3.client("s3")
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         for fname in [report_file, latest_report]:
-            key = f"evidence/reports/{fname.name}"
+            key = f"attest-compliance-auditor/{date_str}/reports/{fname.name}"
             s3.upload_file(str(fname), args.bucket, key,
                            ExtraArgs={"ContentType": "application/json"})
             print(f"[Compliance Engine] Uploaded: s3://{args.bucket}/{key}")

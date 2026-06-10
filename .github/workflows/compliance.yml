@@ -1,4 +1,4 @@
-name: Compliance Evidence Collection
+name: attest-compliance-test
 
 # Triggers for SOC 2 evidence collection
 on:

@@ -360,8 +360,9 @@ def main():
     # Upload to S3
     if args.upload and args.bucket:
         s3 = session.client("s3")
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         for fname in [evidence_file, latest_file]:
-            s3_key = f"evidence/aws/{fname.name}"
+            s3_key = f"attest-compliance-auditor/{date_str}/aws/{fname.name}"
             s3.upload_file(str(fname), args.bucket, s3_key,
                            ExtraArgs={"ContentType": "application/json"})
             print(f"[AWS Evidence] Uploaded: s3://{args.bucket}/{s3_key}")

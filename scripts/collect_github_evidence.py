@@ -308,8 +308,9 @@ def main():
     if args.upload and args.bucket:
         import boto3
         s3 = boto3.client("s3")
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         for fname in [evidence_file, latest_file]:
-            key = f"evidence/github/{fname.name}"
+            key = f"attest-compliance-auditor/{date_str}/github/{fname.name}"
             s3.upload_file(str(fname), args.bucket, key,
                            ExtraArgs={"ContentType": "application/json"})
             print(f"[GitHub Evidence] Uploaded: s3://{args.bucket}/{key}")

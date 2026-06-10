@@ -164,8 +164,10 @@ def main():
     if args.upload and args.bucket:
         import boto3
         s3 = boto3.client("s3")
+        import datetime
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         for fname in [evidence_file, latest_file]:
-            key = f"evidence/zoho/{fname.name}"
+            key = f"attest-compliance-auditor/{date_str}/zoho/{fname.name}"
             s3.upload_file(str(fname), args.bucket, key,
                            ExtraArgs={"ContentType": "application/json"})
             print(f"[Zoho Evidence] Uploaded: s3://{args.bucket}/{key}")

@@ -259,7 +259,9 @@ def main():
     if args.upload and args.bucket:
         import boto3
         s3 = boto3.client("s3")
-        key = f"evidence/reports/{Path(args.output).name}"
+        import datetime
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        key = f"attest-compliance-auditor/{date_str}/reports/{Path(args.output).name}"
         s3.upload_file(args.output, args.bucket, key,
                        ExtraArgs={"ContentType": "application/pdf"})
         print(f"[PDF Gen] Uploaded: s3://{args.bucket}/{key}")
