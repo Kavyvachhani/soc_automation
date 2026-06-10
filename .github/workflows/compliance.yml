@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="${{ secrets.PROJECT_NAME }}"
-          for FN in offer_processor signed_processor approval_handler; do
+          for FN in offer-processor signed-processor approval-handler; do
             echo "=== ${PREFIX}-${FN} ==="
             aws lambda get-function-configuration \
               --function-name "${PREFIX}-${FN}" \

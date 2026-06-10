@@ -89,7 +89,7 @@ jobs:
         id: invoke_approval
         run: |
           set -euo pipefail
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-approval_handler"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-approval-handler"
           EMP_ID="${{ env.EMP_ID }}"
           TOKEN="${{ steps.token.outputs.token }}"
           APPROVER="${{ github.actor }}"

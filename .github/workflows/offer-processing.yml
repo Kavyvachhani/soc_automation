@@ -39,7 +39,7 @@ jobs:
         id: invoke_lambda
         run: |
           set -euo pipefail
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-offer_processor"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-offer-processor"
           BUCKET="${{ secrets.S3_BUCKET }}"
           EMP_ID="${{ env.EMP_ID }}"
 

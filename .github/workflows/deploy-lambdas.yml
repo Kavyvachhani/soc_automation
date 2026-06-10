@@ -69,7 +69,10 @@ jobs:
         run: |
           set -euo pipefail
           FUNC="${{ matrix.function }}"
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${FUNC}"
+          # Lambda functions were created by Terraform with dashes (offer-processor)
+          # Convert underscores to dashes for the function name
+          FUNC_DASHED="${FUNC//_/-}"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${FUNC_DASHED}"
           echo "Deploying to Lambda: $FUNCTION_NAME"
 
           aws lambda update-function-code \
@@ -84,7 +87,9 @@ jobs:
 
       - name: Verify deployment
         run: |
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${{ matrix.function }}"
+          FUNC_DASHED="${{ matrix.function }}"
+          FUNC_DASHED="${FUNC_DASHED//_/-}"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${FUNC_DASHED}"
           aws lambda get-function \
             --function-name "$FUNCTION_NAME" \
             --query 'Configuration.{State:State,LastModified:LastModified,CodeSize:CodeSize}' \
