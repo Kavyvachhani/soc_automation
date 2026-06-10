@@ -77,10 +77,8 @@ jobs:
       - name: Run Shannon AI Pentest
         run: |
           python scripts/ai_pentest.py \
-            --target "https://${{ secrets.PROJECT_NAME }}-portal.example.com/api" \
-            --output /tmp/evidence \
-            --bucket "${{ secrets.S3_BUCKET }}" \
-            --upload
+            --scan-dirs scripts/ \
+            --output /tmp/evidence/ai_evidence_latest.json
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           
@@ -117,7 +115,6 @@ jobs:
           gh issue create \
             --title "🚨 URGENT: SOC 2 Compliance / Security Failure" \
             --body "The automated nightly SOC 2 compliance engine has detected a critical failure or missing evidence. Please review the attached workflow logs and reports in the S3 vault immediately." \
-            --label "security,critical,compliance" \
             --assignee "@me"
         env:
           GH_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}

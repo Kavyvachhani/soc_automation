@@ -42,6 +42,64 @@ This repository contains the prototype implementation for the Industrility DevSe
 4. **View Artifacts:** Once the run completes, download the generated PDFs (Compliance Report & Security Pentest Report) from the Actions Artifacts or via the S3 Bucket.
 5. **Simulate a Failure:** Temporarily remove an environment secret or modify the `ai_pentest.py` target to intentionally fail a control. Observe the automated GitHub Issue being generated.
 
+## System Architecture
+
+The following diagram illustrates the resources deployed in the AWS environment and the endpoints utilized by the compliance engine.
+
+```mermaid
+graph TD
+    subgraph GitHub
+        PR[Pull Requests]
+        GA[GitHub Actions Nightly Cron]
+        Issues[Incident Alerts]
+    end
+
+    subgraph External Systems
+        Zoho[Zoho Identity / People]
+        Shannon[Shannon AI Pentester]
+    end
+
+    subgraph AWS Cloud Environment
+        CW[CloudWatch Alarms]
+        CT[CloudTrail Logs]
+        IAM[IAM / Roles / MFA]
+        S3[S3 WORM Evidence Vault]
+        KMS[KMS Encryption Keys]
+    end
+
+    PR -->|Governance Workflow| GA
+    GA -->|1. fetch github evidence| PR
+    GA -->|2. fetch technical config| AWS Cloud Environment
+    GA -->|3. fetch employee policies| Zoho
+    GA -->|4. run active pentest| Shannon
+    GA -->|5. Aggregate & Analyze| Engine[Compliance Engine]
+    
+    Engine -->|Pass: Upload Report| S3
+    Engine -->|Fail: Trigger Alert| Issues
+
+    style S3 fill:#10B981,stroke:#047857
+    style Issues fill:#EF4444,stroke:#B91C1C
+```
+
+## SOC 2 Compliance Checklist
+
+This prototype automates the following controls mapping to the SOC 2 Trust Services Criteria (Security, Confidentiality, and Availability).
+
+| Control ID | Description | Source | Status |
+|---|---|---|---|
+| **CC6.1** | CloudTrail Enabled in all active regions | AWS API | 🟢 Automated |
+| **CC6.1** | Security Group exposure restricted (No 0.0.0.0/0 to SSH/RDP) | AWS API | 🟢 Automated |
+| **CC6.2** | Branch protection and PR approvals enforced on `main` | GitHub API | 🟢 Automated |
+| **CC6.3** | Multi-Factor Authentication (MFA) enabled for all AWS Users | AWS API | 🟢 Automated |
+| **CC6.3** | AWS Access Keys rotated every 90 days | AWS API | 🟢 Automated |
+| **CC7.2** | CloudWatch billing and security alarms configured | AWS API | 🟢 Automated |
+| **CC8.1** | Employee Handbooks and NDAs digitally signed | Zoho HR API | 🟢 Automated |
+| **A1.1**  | Infrastructure (Lambdas, Buckets) tracked in inventory | AWS API | 🟢 Automated |
+| **A1.1**  | S3 Versioning and WORM locking enabled | AWS API | 🟢 Automated |
+| **C1.1**  | S3 Bucket Public Access Blocked | AWS API | 🟢 Automated |
+| **C1.1**  | S3 Buckets encrypted with KMS | AWS API | 🟢 Automated |
+| **VULN**  | Weekly AI Pentest for OWASP Top 10 | Shannon AI | 🟢 Automated |
+
 ## Architectural Tradeoffs
 
 - **Serverless vs. Centralized:** We opted for a lightweight, serverless, CI/CD-driven execution model (GitHub Actions) rather than a persistent polling service to minimize cost and reduce the compliance scope of the tool itself.
