@@ -202,6 +202,18 @@ def generate_onboarding_report_pdf(
     pdf.output(str(output_path))
 
 
+def _provision_zoho_mail(employee_data: dict, emp_id: str) -> dict:
+    """Simulate creating a Zoho Mail account for the new employee."""
+    name = employee_data.get("name", "employee").replace(" ", ".").lower()
+    email = f"{name}@attest-security.com"
+    print(f"  [Zoho Mail] Simulating creation of mailbox: {email}")
+    return {
+        "email_address": email,
+        "zoho_mail_created": True,
+        "zoho_user_id": f"ZOHO-{emp_id}"
+    }
+
+
 # ─── Core provisioning logic ──────────────────────────────────────────────────
 
 def provision(emp_id: str, approver: str, data_dir: Path, real: bool = False) -> dict:
@@ -231,6 +243,8 @@ def provision(emp_id: str, approver: str, data_dir: Path, real: bool = False) ->
         iam_result = _real_provision(employee_data, bundles, emp_id, now_ts)
     else:
         iam_result = _mock_provision(employee_data, bundles, emp_id)
+        
+    zoho_mail_result = _provision_zoho_mail(employee_data, emp_id)
 
     # ── Build grant records ──
     grants = []
@@ -279,7 +293,8 @@ def provision(emp_id: str, approver: str, data_dir: Path, real: bool = False) ->
         "access_key_id": iam_result.get("access_key_id", "None"),
         "secret_access_key": iam_result.get("secret_access_key", "None"),
         "mfa_required": "true",
-        "mfa_instructions": "Download Google Authenticator, log in to Console, go to My Security Credentials -> Assign MFA Device."
+        "mfa_instructions": "Download Google Authenticator, log in to Console, go to My Security Credentials -> Assign MFA Device.",
+        "company_email": zoho_mail_result.get("email_address", "Unknown")
     }]
     with open(credentials_path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(credentials[0].keys()))

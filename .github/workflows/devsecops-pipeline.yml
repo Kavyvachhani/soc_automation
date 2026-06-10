@@ -1,0 +1,67 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  security-scanning:
+    name: Code & Infrastructure Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Security Tools
+        run: |
+          pip install --quiet bandit safety
+
+      - name: Static Application Security Testing (SAST) - Bandit
+        run: |
+          echo "=== Python Code Scanning (Bandit) ===" > security-report.txt
+          bandit -r scripts/ lambda/ portal/ -ll -q >> security-report.txt || true
+          echo -e "\n\n" >> security-report.txt
+
+      - name: Dependency Vulnerability Scanning (Safety)
+        run: |
+          echo "=== Dependency Scanning (Safety) ===" >> security-report.txt
+          # If a requirements.txt exists, scan it; otherwise skip
+          if [ -f requirements.txt ]; then
+            safety check -r requirements.txt >> security-report.txt || true
+          else
+            echo "No requirements.txt found, skipping safety check." >> security-report.txt
+          fi
+          echo -e "\n\n" >> security-report.txt
+
+      - name: Secret Scanning (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'table'
+          output: 'trivy-report.txt'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Aggregate DevSecOps Report
+        run: |
+          echo "=== Secret Scanning (Trivy) ===" >> security-report.txt
+          cat trivy-report.txt >> security-report.txt || echo "No Trivy output found." >> security-report.txt
+          
+          # Output to console
+          cat security-report.txt
+
+      - name: Upload Security Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devsecops-security-report
+          path: security-report.txt
+          retention-days: 30

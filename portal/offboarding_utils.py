@@ -60,6 +60,18 @@ def get_employee_access_audit(emp_id: str, employee_data: dict) -> dict:
         
     return audit
 
+def _revoke_zoho_mail(emp_id: str, employee_data: dict) -> list:
+    """Simulate destroying a Zoho Mail account for the offboarded employee."""
+    name = employee_data.get("name", "employee").replace(" ", ".").lower()
+    email = f"{name}@attest-security.com"
+    print(f"  [Zoho Mail] Simulating destruction of mailbox: {email}")
+    return [
+        f"Suspended Zoho Mail Account ({email})",
+        f"Revoked App Passwords for {email}",
+        f"Archived Mailbox Data for {email}",
+        f"Deleted Zoho Mail User ZOHO-{emp_id}"
+    ]
+
 def revoke_employee_access(emp_id: str, employee_data: dict) -> dict:
     """Revoke all AWS IAM access for the employee."""
     name = employee_data.get("name", "employee").replace(" ", "-").lower()
@@ -125,6 +137,10 @@ def revoke_employee_access(emp_id: str, employee_data: dict) -> dict:
     except Exception as e:
         result["success"] = False
         result["error"] = str(e)
+        
+    # Append Zoho Mail revocation
+    zoho_actions = _revoke_zoho_mail(emp_id, employee_data)
+    result["actions"].extend(zoho_actions)
         
     return result
 
