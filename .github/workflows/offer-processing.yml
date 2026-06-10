@@ -2,7 +2,7 @@ name: Offer Letter Processing
 
 on:
   repository_dispatch:
-    types: [offer-uploaded]
+    types: [offer-uploaded, onboarding-approved]
   workflow_dispatch:
     inputs:
       emp_id:

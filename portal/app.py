@@ -98,65 +98,132 @@ def get_client_ip() -> str:
         return "127.0.0.1"
 
 
+def _add_branding(pdf, title: str, status: str):
+    """Add professional branding and header."""
+    pdf.set_fill_color(11, 15, 26) # #0B0F1A
+    pdf.rect(0, 0, 210, 25, 'F')
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(20, 8)
+    pdf.cell(0, 10, _safe("ATTEST INC."), align="L")
+    pdf.set_font("Helvetica", "I", 10)
+    pdf.set_xy(20, 8)
+    pdf.cell(170, 10, _safe(status), align="R")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(35)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, _safe(title), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+
+def _add_qr_code(pdf, data: str, x: int, y: int, size: int = 25):
+    """Generate and embed a QR code if library is available."""
+    try:
+        import qrcode
+        import io
+        qr = qrcode.QRCode(version=1, box_size=4, border=1)
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        pdf.image(img_bytes, x=x, y=y, w=size, h=size)
+    except ImportError:
+        pass # Graceful degradation if qrcode isn't installed locally
+
 def render_signed_nda_pdf(nda_text: str, sig_name: str, audit_trail: dict) -> bytes:
     from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
-    pdf = FPDF(); pdf.set_margins(20, 20, 20); pdf.set_auto_page_break(True, 20)
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(True, 20)
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, _safe("NON-DISCLOSURE AGREEMENT"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "I", 10)
-    pdf.cell(0, 7, _safe("[ELECTRONICALLY SIGNED COPY]"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(4); pdf.set_font("Helvetica", size=10)
+    
+    _add_branding(pdf, "NON-DISCLOSURE AGREEMENT", "ELECTRONICALLY SIGNED")
+    _add_qr_code(pdf, f"Attest-Sig-{audit_trail.get('emp_id','Unknown')}-{audit_trail.get('timestamp_utc','')}", 165, 30, 25)
+
+    pdf.set_font("Helvetica", size=10)
     for line in nda_text.split("\n"):
         s = line.strip()
         if s.startswith("## "):
-            pdf.set_font("Helvetica", "B", 11); pdf.cell(0, 9, _safe(s[3:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT); pdf.set_font("Helvetica", size=10)
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 9, _safe(s[3:]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=10)
         elif s == "":
             pdf.ln(3)
         else:
-            pdf.multi_cell(0, 6, _safe(line), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(8); pdf.set_line_width(0.5); pdf.line(20, pdf.get_y(), 190, pdf.get_y()); pdf.ln(4)
+            pdf.multi_cell(0, 6, _safe(line), new_x="LMARGIN", new_y="NEXT")
+            
+    pdf.ln(10)
+    pdf.set_line_width(0.5)
+    pdf.set_draw_color(99, 102, 241) # Indigo accent
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
+    
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 9, _safe("ELECTRONIC SIGNATURE RECORD"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 9, _safe("ELECTRONIC SIGNATURE RECORD"), new_x="LMARGIN", new_y="NEXT")
+    
     pdf.set_font("Courier", size=9)
-    for label, value in [("Signer Name", audit_trail.get("signer_name","")),
-                          ("Timestamp (UTC)", audit_trail.get("timestamp_utc","")),
-                          ("IP Address", audit_trail.get("source_ip","")),
-                          ("Consent", str(audit_trail.get("consent",False)))]:
-        pdf.cell(55, 7, _safe(f"{label}:")); pdf.multi_cell(0, 7, _safe(str(value)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_fill_color(243, 244, 246)
+    pdf.set_draw_color(209, 213, 219)
+    for label, value in [
+        ("Signer Name", audit_trail.get("signer_name","")),
+        ("Timestamp (UTC)", audit_trail.get("timestamp_utc","")),
+        ("IP Address", audit_trail.get("source_ip","")),
+        ("Consent", str(audit_trail.get("consent",False)))
+    ]:
+        pdf.cell(45, 8, _safe(f" {label}"), border=1, fill=True)
+        pdf.cell(125, 8, _safe(f" {value}"), border=1, new_x="LMARGIN", new_y="NEXT")
+        
     return bytes(pdf.output())
-
 
 def render_policy_ack_pdf(policy_label: str, policy_text: str, audit_trail: dict) -> bytes:
     from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
-    pdf = FPDF(); pdf.set_margins(20, 20, 20); pdf.set_auto_page_break(True, 20)
+    import re
+    pdf = FPDF()
+    pdf.set_margins(20, 20, 20)
+    pdf.set_auto_page_break(True, 20)
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 15)
-    pdf.cell(0, 12, _safe(policy_label.upper()), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "I", 9)
-    pdf.cell(0, 6, _safe("[ELECTRONICALLY ACKNOWLEDGED]"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(4); pdf.set_font("Helvetica", size=9)
+    
+    _add_branding(pdf, policy_label.upper(), "ELECTRONICALLY ACKNOWLEDGED")
+    _add_qr_code(pdf, f"Attest-Ack-{audit_trail.get('emp_id','Unknown')}-{audit_trail.get('policy_id','')}", 165, 30, 25)
+
+    pdf.set_font("Helvetica", size=9)
     for line in policy_text.split("\n"):
         s = line.strip()
         if s.startswith("# "):
-            pdf.set_font("Helvetica","B",13); pdf.cell(0,9,_safe(s[2:]),new_x=XPos.LMARGIN,new_y=YPos.NEXT); pdf.set_font("Helvetica",size=9)
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.cell(0, 9, _safe(s[2:]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=9)
         elif s.startswith("## "):
-            pdf.set_font("Helvetica","B",11); pdf.cell(0,8,_safe(s[3:]),new_x=XPos.LMARGIN,new_y=YPos.NEXT); pdf.set_font("Helvetica",size=9)
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 8, _safe(s[3:]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", size=9)
         elif s == "":
             pdf.ln(3)
         else:
             clean = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', s)
-            pdf.multi_cell(0, 5, _safe(clean), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(8); pdf.set_line_width(0.5); pdf.line(20, pdf.get_y(), 190, pdf.get_y()); pdf.ln(4)
-    pdf.set_font("Helvetica","B",11); pdf.cell(0,8,_safe("ACKNOWLEDGEMENT & SIGNATURE"),new_x=XPos.LMARGIN,new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", size=9)
-    for label, value in [("Policy", policy_label), ("Signer", audit_trail.get("signer_name","")),
-                          ("Signed At", audit_trail.get("timestamp_utc","")),
-                          ("Consent","I have read, understood, and agree to comply with this policy.")]:
-        pdf.set_font("Helvetica","B",9); pdf.cell(50,6,_safe(f"{label}:"))
-        pdf.set_font("Helvetica",size=9); pdf.multi_cell(0,6,_safe(str(value)),new_x=XPos.LMARGIN,new_y=YPos.NEXT)
+            pdf.multi_cell(0, 5, _safe(clean), new_x="LMARGIN", new_y="NEXT")
+            
+    pdf.ln(10)
+    pdf.set_line_width(0.5)
+    pdf.set_draw_color(99, 102, 241) # Indigo accent
+    pdf.line(20, pdf.get_y(), 190, pdf.get_y())
+    pdf.ln(6)
+    
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 9, _safe("ACKNOWLEDGEMENT RECORD"), new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_font("Courier", size=9)
+    pdf.set_fill_color(243, 244, 246)
+    pdf.set_draw_color(209, 213, 219)
+    for label, value in [
+        ("Policy", policy_label), 
+        ("Signer Name", audit_trail.get("signer_name","")),
+        ("Timestamp (UTC)", audit_trail.get("timestamp_utc","")),
+        ("Consent", "I have read, understood, and agree to comply with this policy.")
+    ]:
+        pdf.cell(45, 8, _safe(f" {label}"), border=1, fill=True)
+        pdf.cell(125, 8, _safe(f" {value}"), border=1, new_x="LMARGIN", new_y="NEXT")
+        
     return bytes(pdf.output())
 
 
@@ -186,18 +253,34 @@ _CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; }
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
 
-/* Clean, bright background */
+/* Hide Streamlit default UI elements */
+header[data-testid="stHeader"], footer, #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { 
+    display: none !important; 
+}
+
+/* Premium Dark Mode Background */
 [data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { 
-    background-color: #f9fafb !important; 
-    color: #111827 !important; 
+    background-color: #0B0F1A !important; 
+    color: #F3F4F6 !important; 
+}
+
+/* File Uploader Fixes */
+[data-testid="stFileUploader"] { background: transparent !important; }
+[data-testid="stFileUploader"] section { 
+    background: rgba(17, 24, 39, 0.6) !important; 
+    border: 1px dashed rgba(99, 102, 241, 0.4) !important; 
+    border-radius: 12px !important;
+}
+[data-testid="stFileUploader"] section:hover {
+    border-color: #6366F1 !important;
+    background: rgba(17, 24, 39, 0.8) !important;
 }
 
 /* Subtle dot pattern for texture */
 [data-testid="stAppViewContainer"]::before {
     content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+    background-image: radial-gradient(#1F2937 1px, transparent 1px);
     background-size: 24px 24px;
     z-index: -1; opacity: 0.6;
 }
@@ -206,98 +289,98 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, BlinkMacSystem
 
 /* Clean Sidebar */
 [data-testid="stSidebar"] {
-    background: #ffffff !important;
-    border-right: 1px solid #e5e7eb !important;
+    background: #0D1326 !important;
+    border-right: 1px solid #1F2937 !important;
 }
-[data-testid="stSidebar"] * { color: #374151 !important; }
+[data-testid="stSidebar"] * { color: #D1D5DB !important; }
 
 /* Typography */
-h1, h2, h3, h4 { color: #111827 !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
+h1, h2, h3, h4 { color: #F9FAFB !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
 h1 { font-size: 2.2rem !important; margin-bottom: 0.5rem !important; }
-p, .stMarkdown p { color: #4b5563 !important; line-height: 1.6 !important; font-size: 1rem !important; }
-strong { color: #111827 !important; font-weight: 600 !important; }
+p, .stMarkdown p { color: #9CA3AF !important; line-height: 1.6 !important; font-size: 1rem !important; }
+strong { color: #F3F4F6 !important; font-weight: 600 !important; }
 
 /* Step header */
-.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid #e5e7eb; }
-.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: #4f46e5; font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2); }
-.step-title { color: #111827 !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
-.step-sub { color: #6b7280; font-size: 0.95rem; margin-top: 4px; }
+.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid #1F2937; }
+.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: #6366F1; font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4); }
+.step-title { color: #F9FAFB !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
+.step-sub { color: #9CA3AF; font-size: 0.95rem; margin-top: 4px; }
 
 /* Sidebar steps */
 .sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.95rem; transition: all 0.2s ease; }
-.sb-step-done { color: #059669 !important; font-weight: 500; }
-.sb-step-active { background: #f3f4f6; color: #111827 !important; font-weight: 600; border-left: 4px solid #4f46e5; transform: translateX(4px); }
-.sb-step-todo { color: #9ca3af !important; }
+.sb-step-done { color: #34D399 !important; font-weight: 500; }
+.sb-step-active { background: rgba(99, 102, 241, 0.1); color: #F3F4F6 !important; font-weight: 600; border-left: 4px solid #6366F1; transform: translateX(4px); }
+.sb-step-todo { color: #6B7280 !important; }
 
-/* Premium Cards (Metrics, Expanders, Block Wrappers) */
+/* Glassmorphism Cards */
 [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
-    background: #ffffff !important;
-    border: 1px solid #e5e7eb !important;
+    background: rgba(17, 24, 39, 0.7) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 12px !important;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1) !important;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover { 
     transform: translateY(-2px) !important; 
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04) !important;
-    border-color: #d1d5db !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2) !important;
+    border-color: rgba(99, 102, 241, 0.4) !important;
 }
 
 /* Primary Action Buttons */
 .stButton>button {
-    background: #000000 !important;
-    color: #ffffff !important; 
-    border: 1px solid transparent !important; 
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #F9FAFB !important; 
+    border: 1px solid rgba(255, 255, 255, 0.1) !important; 
     border-radius: 8px !important; 
     font-weight: 500 !important; 
     font-size: 0.95rem !important; 
     padding: 0.5rem 1.2rem !important; 
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important; 
     transition: all 0.2s ease !important;
 }
 .stButton>button:hover { 
-    background: #1f2937 !important;
+    background: rgba(255, 255, 255, 0.1) !important;
     transform: translateY(-1px) !important; 
-    box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important; 
 }
 
 /* Approve Button (Accent) */
 .stButton>button[kind="primary"] {
-    background: #4f46e5 !important;
-    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2) !important;
+    background: #6366F1 !important;
+    border-color: #6366F1 !important;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3) !important;
 }
 .stButton>button[kind="primary"]:hover {
-    background: #4338ca !important;
-    box-shadow: 0 4px 6px rgba(79, 70, 229, 0.3) !important;
+    background: #4F46E5 !important;
+    border-color: #4F46E5 !important;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5) !important;
 }
 
 /* Download Buttons */
 [data-testid="stDownloadButton"]>button {
-    background: #ffffff !important;
-    border: 1px solid #d1d5db !important;
-    color: #374151 !important; 
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; 
+    background: rgba(17, 24, 39, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    color: #D1D5DB !important; 
     border-radius: 8px !important;
 }
 [data-testid="stDownloadButton"]>button:hover { 
-    background: #f9fafb !important; 
-    border-color: #9ca3af !important; 
-    transform: translateY(-1px) !important; 
-    color: #111827 !important; 
+    background: rgba(31, 41, 55, 0.9) !important; 
+    border-color: rgba(255, 255, 255, 0.25) !important; 
+    color: #F9FAFB !important; 
 }
 
 /* Form inputs */
 [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
-    background: #ffffff !important; 
-    border: 1px solid #d1d5db !important; 
+    background: rgba(17, 24, 39, 0.8) !important; 
+    border: 1px solid rgba(255, 255, 255, 0.1) !important; 
     border-radius: 8px !important; 
-    color: #111827 !important; 
+    color: #F9FAFB !important; 
     transition: all 0.2s;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) inset !important;
 }
 [data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
-    border-color: #4f46e5 !important; 
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2) !important;
+    border-color: #6366F1 !important; 
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
 }
 </style>
 """

@@ -39,104 +39,115 @@ _CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; }
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
 
-/* Clean, bright background */
+/* Hide Streamlit default UI elements */
+header[data-testid="stHeader"], footer, #MainMenu, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { 
+    display: none !important; 
+}
+
+/* Premium Dark Mode Background */
 [data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { 
-    background-color: #f9fafb !important; 
-    color: #111827 !important; 
+    background-color: #0B0F1A !important; 
+    color: #F3F4F6 !important; 
 }
 
 /* Subtle dot pattern for texture */
 [data-testid="stAppViewContainer"]::before {
     content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+    background-image: radial-gradient(#1F2937 1px, transparent 1px);
     background-size: 24px 24px;
     z-index: -1; opacity: 0.6;
 }
 
 .block-container { padding-top: 3rem !important; padding-bottom: 5rem !important; max-width: 1100px !important; }
 
-/* Typography */
-h1, h2, h3, h4 { color: #111827 !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
-h1 { font-size: 2.2rem !important; margin-bottom: 0.5rem !important; }
-p, .stMarkdown p { color: #4b5563 !important; line-height: 1.6 !important; font-size: 1rem !important; }
-strong { color: #111827 !important; font-weight: 600 !important; }
+/* Clean Sidebar */
+[data-testid="stSidebar"] {
+    background: #0D1326 !important;
+    border-right: 1px solid #1F2937 !important;
+}
+[data-testid="stSidebar"] * { color: #D1D5DB !important; }
 
-/* Premium Cards (Metrics, Expanders, Block Wrappers) */
+/* Typography */
+h1, h2, h3, h4 { color: #F9FAFB !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
+h1 { font-size: 2.2rem !important; margin-bottom: 0.5rem !important; }
+p, .stMarkdown p { color: #9CA3AF !important; line-height: 1.6 !important; font-size: 1rem !important; }
+strong { color: #F3F4F6 !important; font-weight: 600 !important; }
+
+/* Glassmorphism Cards */
 [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
-    background: #ffffff !important;
-    border: 1px solid #e5e7eb !important;
+    background: rgba(17, 24, 39, 0.7) !important;
+    backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 12px !important;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1) !important;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover { 
     transform: translateY(-2px) !important; 
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04) !important;
-    border-color: #d1d5db !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2) !important;
+    border-color: rgba(99, 102, 241, 0.4) !important;
 }
 
 /* Metric text adjustments */
-[data-testid="stMetricLabel"] { color: #6b7280 !important; font-weight: 500 !important; font-size: 0.85rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
-[data-testid="stMetricValue"] { color: #111827 !important; font-weight: 700 !important; }
+[data-testid="stMetricLabel"] { color: #9CA3AF !important; font-weight: 500 !important; font-size: 0.85rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
+[data-testid="stMetricValue"] { color: #F9FAFB !important; font-weight: 700 !important; }
 
 /* Primary Action Buttons */
 .stButton>button {
-    background: #000000 !important;
-    color: #ffffff !important; 
-    border: 1px solid transparent !important; 
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #F9FAFB !important; 
+    border: 1px solid rgba(255, 255, 255, 0.1) !important; 
     border-radius: 8px !important; 
     font-weight: 500 !important; 
     font-size: 0.95rem !important; 
     padding: 0.5rem 1.2rem !important; 
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2) !important; 
     transition: all 0.2s ease !important;
 }
 .stButton>button:hover { 
-    background: #1f2937 !important;
+    background: rgba(255, 255, 255, 0.1) !important;
     transform: translateY(-1px) !important; 
-    box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important; 
 }
 
 /* Approve Button (Accent) */
 .stButton>button[kind="primary"] {
-    background: #4f46e5 !important;
-    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2) !important;
+    background: #6366F1 !important;
+    border-color: #6366F1 !important;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3) !important;
 }
 .stButton>button[kind="primary"]:hover {
-    background: #4338ca !important;
-    box-shadow: 0 4px 6px rgba(79, 70, 229, 0.3) !important;
+    background: #4F46E5 !important;
+    border-color: #4F46E5 !important;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5) !important;
 }
 
 /* Reject Button Variant */
 .reject-btn button {
-    background: #ffffff !important;
-    color: #dc2626 !important;
-    border: 1px solid #fca5a5 !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+    background: rgba(220, 38, 38, 0.1) !important;
+    color: #FCA5A5 !important;
+    border: 1px solid rgba(239, 68, 68, 0.2) !important;
 }
 .reject-btn button:hover { 
-    background: #fef2f2 !important; 
-    border-color: #ef4444 !important; 
+    background: rgba(220, 38, 38, 0.2) !important; 
+    border-color: rgba(239, 68, 68, 0.4) !important; 
 }
 
 /* Download Buttons */
 [data-testid="stDownloadButton"]>button {
-    background: #ffffff !important;
-    border: 1px solid #d1d5db !important;
-    color: #374151 !important; 
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; 
+    background: rgba(17, 24, 39, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    color: #D1D5DB !important; 
     border-radius: 8px !important;
 }
 [data-testid="stDownloadButton"]>button:hover { 
-    background: #f9fafb !important; 
-    border-color: #9ca3af !important; 
-    transform: translateY(-1px) !important; 
-    color: #111827 !important; 
+    background: rgba(31, 41, 55, 0.9) !important; 
+    border-color: rgba(255, 255, 255, 0.25) !important; 
+    color: #F9FAFB !important; 
 }
 
-hr { border-color: #e5e7eb !important; margin: 2.5rem 0 !important; border-top-width: 1px !important; }
+hr { border-color: #1F2937 !important; margin: 2.5rem 0 !important; border-top-width: 1px !important; }
 </style>
 """
 
@@ -153,7 +164,7 @@ def get_pending_requests() -> list[dict]:
         return []
     try:
         r = _portal_api("GET", "/portal/pending")
-        return r.get("requests", [])
+        return r.get("employees", [])
     except Exception as e:
         st.error(f"Portal API unavailable: {e}")
         return []
@@ -274,9 +285,22 @@ st.markdown(
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request list
-# ═══════════════════════════════════════════════════════════════════════════════
-
 requests = get_pending_requests()
+
+# Retain recently acted upon requests so we can show their updated state (e.g., the slider)
+if "recent_requests" not in st.session_state:
+    st.session_state.recent_requests = []
+
+# Update our recent requests list with anything new we fetched
+fetched_ids = {r["emp_id"] for r in requests}
+for r in st.session_state.recent_requests:
+    if r["emp_id"] not in fetched_ids:
+        # It's no longer pending, but we want to show it if we just approved it
+        if st.session_state.get(f"approved_{r['emp_id']}") or st.session_state.get(f"rejected_{r['emp_id']}"):
+            requests.insert(0, r)
+
+# Cache the latest state
+st.session_state.recent_requests = list(requests)
 
 if not requests:
     st.markdown(
@@ -346,19 +370,50 @@ else:
                     unsafe_allow_html=True,
                 )
 
+                if is_onboarding:
+                    # Preview Provisioning Details
+                    emp_name_clean = emp_name.lower().replace(' ', '.')
+                    emp_name_dash = emp_name.lower().replace(' ', '-')
+                    zoho_email = f"{emp_name_clean}@attest-security.com"
+                    iam_username = f"{emp_name_dash}-{emp_id.lower()}"
+                    access_policies = "PowerUserAccess" if "engineer" in role.lower() or "developer" in role.lower() else "AmazonS3ReadOnlyAccess"
+                    
+                    st.markdown(
+                        f'<div style="margin-top:12px;background:rgba(255,255,255,0.03);padding:10px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);">'
+                        f'<div style="color:#a5b4fc;font-size:0.8rem;font-weight:600;margin-bottom:6px;">Expected Provisioning</div>'
+                        f'<div style="color:#d1d5db;font-size:0.85rem;">'
+                        f'• <b>Zoho Mail:</b> {zoho_email}<br/>'
+                        f'• <b>IAM User:</b> {iam_username}<br/>'
+                        f'• <b>AWS Access:</b> {access_policies}'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
+
             with col_act:
-                st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
-                approve_key = f"app_{emp_id}_{req_type}"
-                reject_key  = f"rej_{emp_id}_{req_type}"
+                # Use session state to track if we just approved this
+                approved_key = f"approved_{emp_id}"
+                if st.session_state.get(approved_key):
+                    st.success("✅ Approved")
+                    with st.expander("View Provisioned Resources", expanded=True):
+                        st.markdown(
+                            f"**Zoho Account:** `{zoho_email}`  \n"
+                            f"**IAM User:** `{iam_username}`  \n"
+                            f"**Policies Attached:** `{access_policies}`  \n"
+                            f"*(Evidence synced to S3 and GitHub Actions)*"
+                        )
+                    st.slider("Confidence level of approval", 0, 100, 100, key=f"slide_{emp_id}")
+                else:
+                    if st.button("Approve", key=f"app_{emp_id}", type="primary", use_container_width=True):
+                        success = handle_onboarding(emp_id, data.get("token",""), "approve") if is_onboarding else handle_offboarding(emp_id, "approve")
+                        if success:
+                            st.session_state[approved_key] = True
 
-                if st.button("✅ Approve", key=approve_key, type="primary", use_container_width=True):
-                    ok = handle_onboarding(emp_id, data.get("token", ""), "approve") if is_onboarding else handle_offboarding(emp_id, "approve")
-                    if ok: st.rerun()
-
-                st.markdown('<div style="height:6px;"></div>', unsafe_allow_html=True)
-                if st.button("❌ Reject", key=reject_key, use_container_width=True):
-                    ok = handle_onboarding(emp_id, data.get("token", ""), "reject") if is_onboarding else handle_offboarding(emp_id, "reject")
-                    if ok: st.rerun()
+                    st.markdown('<div class="reject-btn">', unsafe_allow_html=True)
+                    if st.button("Reject", key=f"rej_{emp_id}", use_container_width=True):
+                        if is_onboarding: handle_onboarding(emp_id, data.get("token",""), "reject")
+                        else: handle_offboarding(emp_id, "reject")
+                        st.session_state[f"rejected_{emp_id}"] = True
+                    st.markdown('</div>', unsafe_allow_html=True)
 
             # Evidence download links for completed onboarding
             if is_onboarding and data.get("status") == "approved":

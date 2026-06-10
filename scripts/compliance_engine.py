@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""
+scripts/compliance_engine.py — Central SOC 2 Compliance Validation Engine
+
+Reads all collected evidence (AWS, GitHub, Zoho), evaluates the final
+compliance state, generates a consolidated summary JSON, and exits with
+status code 1 if any critical control fails.
+
+Usage:
+  python scripts/compliance_engine.py --evidence-dir /tmp/evidence --output /tmp/reports
+"""
+
+import argparse
+import datetime
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def now_utc() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def load_latest_evidence(evidence_dir: Path, source: str) -> dict:
+    """Load the *_evidence_latest.json file for a given source."""
+    latest_file = evidence_dir / f"{source}_evidence_latest.json"
+    if not latest_file.exists():
+        # Try to find a timestamped one
+        files = sorted(evidence_dir.glob(f"{source}_evidence_*.json"))
+        if files:
+            latest_file = files[-1]
+        else:
+            return {}
+            
+    try:
+        return json.loads(latest_file.read_text())
+    except Exception as e:
+        print(f"Error reading {latest_file}: {e}")
+        return {}
+
+
+def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict) -> dict:
+    """Evaluate overall compliance and map to SOC 2 criteria."""
+    
+    report = {
+        "generated_at": now_utc(),
+        "overall_status": "PASS",
+        "total_controls_checked": 0,
+        "pass_count": 0,
+        "fail_count": 0,
+        "warn_count": 0,
+        "failed_controls": [],
+        "evidence_sources": {
+            "aws": "collected" if aws_ev else "missing",
+            "github": "collected" if github_ev else "missing",
+            "zoho": "collected" if zoho_ev else "missing"
+        },
+        "controls_matrix": []
+    }
+    
+    # Check if we have evidence from all sources
+    if not aws_ev or not github_ev or not zoho_ev:
+        report["overall_status"] = "FAIL"
+        report["failed_controls"].append("Missing Evidence Sources")
+    
+    # Process all results
+    all_results = []
+    if aws_ev and "results" in aws_ev: all_results.extend(aws_ev["results"])
+    if github_ev and "results" in github_ev: all_results.extend(github_ev["results"])
+    if zoho_ev and "results" in zoho_ev: all_results.extend(zoho_ev["results"])
+    
+    report["total_controls_checked"] = len(all_results)
+    
+    for res in all_results:
+        status = res.get("status", "UNKNOWN")
+        if status == "PASS":
+            report["pass_count"] += 1
+        elif status == "FAIL":
+            report["fail_count"] += 1
+            report["overall_status"] = "FAIL"
+            report["failed_controls"].append(f"[{res.get('control_id')}] {res.get('control')}")
+        elif status == "WARN":
+            report["warn_count"] += 1
+            
+        report["controls_matrix"].append({
+            "id": res.get("control_id"),
+            "name": res.get("control"),
+            "status": status,
+            "reason": res.get("reason", "")
+        })
+        
+    # Hardcoded rules that fail the workflow if completely missing
+    required_ids = {"CC6.1", "CC6.2", "P6.1"}
+    found_ids = {r.get("control_id") for r in all_results}
+    missing_required = required_ids - found_ids
+    
+    if missing_required:
+        report["overall_status"] = "FAIL"
+        report["failed_controls"].append(f"Missing required controls: {', '.join(missing_required)}")
+
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SOC 2 Compliance Validation Engine")
+    parser.add_argument("--evidence-dir", required=True, help="Directory containing evidence JSONs")
+    parser.add_argument("--output", default="/tmp/reports", help="Output directory for reports")
+    parser.add_argument("--upload", action="store_true")
+    parser.add_argument("--bucket", default=os.environ.get("S3_BUCKET", ""))
+    args = parser.parse_args()
+
+    evidence_dir = Path(args.evidence_dir)
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print("[Compliance Engine] Starting SOC 2 validation...")
+    
+    aws_ev = load_latest_evidence(evidence_dir, "aws")
+    github_ev = load_latest_evidence(evidence_dir, "github")
+    zoho_ev = load_latest_evidence(evidence_dir, "zoho")
+    
+    report = evaluate_compliance(aws_ev, github_ev, zoho_ev)
+    
+    # Write summary report
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_file = output_dir / f"compliance_summary_{ts}.json"
+    report_file.write_text(json.dumps(report, indent=2))
+    
+    latest_report = output_dir / "compliance_summary_latest.json"
+    latest_report.write_text(json.dumps(report, indent=2))
+    
+    print(f"[Compliance Engine] Report generated: {report_file}")
+    
+    if args.upload and args.bucket:
+        import boto3
+        s3 = boto3.client("s3")
+        for fname in [report_file, latest_report]:
+            key = f"evidence/reports/{fname.name}"
+            s3.upload_file(str(fname), args.bucket, key,
+                           ExtraArgs={"ContentType": "application/json"})
+            print(f"[Compliance Engine] Uploaded: s3://{args.bucket}/{key}")
+            
+    print("\n" + "=" * 60)
+    print(f"SOC 2 COMPLIANCE STATUS: {report['overall_status']}")
+    print("=" * 60)
+    print(f"Total Controls: {report['total_controls_checked']}")
+    print(f"Passed: {report['pass_count']}")
+    print(f"Failed: {report['fail_count']}")
+    print(f"Warnings: {report['warn_count']}")
+    
+    if report["overall_status"] == "FAIL":
+        print("\n❌ CRITICAL FAILURES DETECTED:")
+        for fc in report["failed_controls"]:
+            print(f"  - {fc}")
+        sys.exit(1)
+    else:
+        print("\n✅ All compliance checks passed.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

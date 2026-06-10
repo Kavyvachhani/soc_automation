@@ -212,32 +212,37 @@ def _safe(s: str) -> str:
     return s.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def render_nda_pdf(nda_text: str) -> bytes:
-    from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
+def render_nda_pdf(nda_text: str, emp_id: str = "PENDING") -> bytes:
+    try:
+        from pdf_utils import render_nda_pdf as utils_render_nda_pdf
+        return utils_render_nda_pdf(nda_text, emp_id)
+    except ImportError as e:
+        print(f"Warning: Could not import pdf_utils, falling back to basic rendering: {e}")
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
 
-    pdf = FPDF()
-    pdf.set_margins(20, 20, 20)
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
+        pdf = FPDF()
+        pdf.set_margins(20, 20, 20)
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.add_page()
 
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, text=_safe("NON-DISCLOSURE AGREEMENT"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 12, text=_safe("NON-DISCLOSURE AGREEMENT"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(4)
 
-    pdf.set_font("Helvetica", size=10)
-    for line in nda_text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 10, text=_safe(stripped[3:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font("Helvetica", size=10)
-        elif stripped == "":
-            pdf.ln(3)
-        else:
-            pdf.multi_cell(0, 6, text=_safe(line), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", size=10)
+        for line in nda_text.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.cell(0, 10, text=_safe(stripped[3:]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", size=10)
+            elif stripped == "":
+                pdf.ln(3)
+            else:
+                pdf.multi_cell(0, 6, text=_safe(line), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    return bytes(pdf.output())
+        return bytes(pdf.output())
 
 
 # ─── Lambda handler ───────────────────────────────────────────────────────────
@@ -292,7 +297,7 @@ def handler(event: dict, context) -> dict:
             )
 
             # Render and store unsigned NDA PDF
-            pdf_bytes_out = render_nda_pdf(nda_text)
+            pdf_bytes_out = render_nda_pdf(nda_text, emp_id)
             s3.put_object(
                 Bucket=bucket,
                 Key=f"{prefix}nda-unsigned.pdf",

@@ -23,6 +23,9 @@ import datetime
 import json
 import os
 import uuid
+import urllib.request
+import csv
+import io
 
 import boto3
 from botocore.exceptions import ClientError
@@ -257,12 +260,51 @@ def manager_approve(event: dict) -> dict:
         else:
             data["rejected_by"] = approver; data["rejected_at"] = ts
         s3.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(data, indent=2).encode(), ContentType="application/json")
-        
         if action == "approve" and req_type == "offboarding":
             try:
                 process_offboarding(emp_id, approver)
             except Exception as e:
                 print(f"Error processing offboarding: {e}")
+                
+        if action == "approve" and req_type == "onboarding":
+            try:
+                # Provisioning Mock & Evidence Generation
+                emp_name = data.get("employee_name", "Employee")
+                emp_name_clean = emp_name.lower().replace(' ', '.')
+                emp_name_dash = emp_name.lower().replace(' ', '-')
+                zoho_email = f"{emp_name_clean}@attest-security.com"
+                iam_username = f"{emp_name_dash}-{emp_id.lower()}"
+                role = data.get("designation", data.get("experience_level", ""))
+                policy = "arn:aws:iam::aws:policy/PowerUserAccess" if "engineer" in role.lower() or "developer" in role.lower() else "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+                
+                # Write AWS Access Credentials CSV
+                creds_buf = io.StringIO()
+                cw = csv.DictWriter(creds_buf, fieldnames=["username", "access_key_id", "secret_access_key", "zoho_email", "temp_password"])
+                cw.writeheader()
+                cw.writerow({"username": iam_username, "access_key_id": "AKIAZOXT_MOCK_DEV_KEY", "secret_access_key": "MOCK_SECRET_KEY_ICxrD", "zoho_email": zoho_email, "temp_password": "MockPassword123!"})
+                s3.put_object(Bucket=S3_BUCKET, Key=f"employees/{emp_id}/aws-access-credentials.csv", Body=creds_buf.getvalue().encode(), ContentType="text/csv")
+                
+                # Write Access Granted CSV
+                granted_buf = io.StringIO()
+                gw = csv.DictWriter(granted_buf, fieldnames=["emp_id", "name", "zoho_email", "iam_username", "policy_arn", "approved_by", "approved_at"])
+                gw.writeheader()
+                gw.writerow({"emp_id": emp_id, "name": emp_name, "zoho_email": zoho_email, "iam_username": iam_username, "policy_arn": policy, "approved_by": approver, "approved_at": ts})
+                s3.put_object(Bucket=S3_BUCKET, Key=f"employees/{emp_id}/access-granted.csv", Body=granted_buf.getvalue().encode(), ContentType="text/csv")
+                
+                # Write Evidence Index
+                index = {
+                    "emp_id": emp_id, "status": "APPROVED", "approval_date": ts, "approver": approver,
+                    "evidence_files": {
+                        "aws-access-credentials.csv": "hash", "access-granted.csv": "hash", "signed-nda.pdf": "hash", "signed-security.pdf": "hash", "signed-handbook.pdf": "hash", "signed-acceptable_use.pdf": "hash", "offer-letter.pdf": "hash"
+                    }
+                }
+                s3.put_object(Bucket=S3_BUCKET, Key=f"employees/{emp_id}/evidence-index.json", Body=json.dumps(index).encode(), ContentType="application/json")
+                
+                # Dispatch GitHub Action to sync workflow
+                _dispatch_github("onboarding-approved", {"emp_id": emp_id})
+                
+            except Exception as e:
+                print(f"Error processing onboarding provisioning: {e}")
 
         return ok({"emp_id": emp_id, "status": data["status"], "by": approver})
     except ClientError as e:
@@ -378,22 +420,31 @@ def process_offboarding(emp_id: str, approver: str):
         pdf.set_margins(20, 20, 20)
         pdf.set_auto_page_break(auto=True, margin=20)
         pdf.add_page()
-        pdf.set_fill_color(220, 38, 38)
-        pdf.rect(0, 0, 210, 40, "F")
+        
+        # Branding
+        pdf.set_fill_color(11, 15, 26) # #0B0F1A Dark mode header
+        pdf.rect(0, 0, 210, 25, "F")
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 18)
-        pdf.set_y(15)
-        pdf.cell(0, 10, "SOC 2 OFFBOARDING & DEPROVISIONING", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_xy(20, 8)
+        pdf.cell(0, 10, "ATTEST INC.", align="L")
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_xy(20, 8)
+        pdf.cell(170, 10, "OFFBOARDING COMPLETE", align="R")
+        
         pdf.set_text_color(33, 37, 41)
-        pdf.ln(15)
+        pdf.set_y(35)
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, "SOC 2 OFFBOARDING & DEPROVISIONING", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(10)
         
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, "Employee Information", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font("Helvetica", "", 10)
         pdf.cell(40, 6, "Name:"); pdf.cell(0, 6, str(employee_data.get("name", "Unknown")), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.cell(40, 6, "Employee ID:"); pdf.cell(0, 6, str(emp_id), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(40, 6, "Date:"); pdf.cell(0, 6, now_utc(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(40, 6, "Approving Manager:"); pdf.cell(0, 6, approver, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(40, 6, "Date:"); pdf.cell(0, 6, str(now_utc()), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(40, 6, "Approving Manager:"); pdf.cell(0, 6, str(approver), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         
         pdf.ln(5)
         pdf.set_font("Helvetica", "B", 12)
@@ -408,7 +459,7 @@ def process_offboarding(emp_id: str, approver: str):
         pdf.set_font("Helvetica", "", 10)
         pdf.multi_cell(0, 5, f"{len(audit_logs)} recent API events captured and stored in offboarding-evidence.json.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         
-        pdf_bytes = pdf.output(dest="S")
+        pdf_bytes = bytes(pdf.output())
         s3.put_object(Bucket=S3_BUCKET, Key=f"{prefix}/offboarding-report.pdf",
                       Body=pdf_bytes, ContentType="application/pdf")
     except Exception as e:
@@ -484,6 +535,9 @@ def _dispatch_github(emp_id: str, event_type: str) -> None:
     if not token or not org:
         print(f"[portal_api] GitHub dispatch skipped — TOKEN/ORG not set")
         return
+    import urllib.error
+    import time
+
     payload = json.dumps({"event_type": event_type, "client_payload": {"emp_id": emp_id}}).encode()
     req = urllib.request.Request(
         f"https://api.github.com/repos/{org}/{repo}/dispatches",
@@ -496,11 +550,22 @@ def _dispatch_github(emp_id: str, event_type: str) -> None:
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            print(f"[portal_api] GitHub dispatch OK: {event_type} status={resp.status}")
-    except Exception as e:
-        print(f"[portal_api] GitHub dispatch failed: {e}")
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print(f"[portal_api] GitHub dispatch OK: {event_type} status={resp.status}")
+                return
+        except urllib.error.HTTPError as e:
+            print(f"[portal_api] GitHub dispatch failed (attempt {attempt + 1}/{max_retries}): {e.code} {e.reason}")
+            if e.code == 403 or e.code == 429: # Rate limits
+                time.sleep(2 ** attempt)
+            else:
+                break
+        except Exception as e:
+            print(f"[portal_api] GitHub dispatch failed (attempt {attempt + 1}/{max_retries}): {e}")
+            time.sleep(2 ** attempt)
 
 
 # ─── Handler ──────────────────────────────────────────────────────────────────
