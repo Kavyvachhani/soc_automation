@@ -19,3 +19,9 @@ ENV/
 # Local data
 data/
 build_lambda/
+
+# Generated / runtime
+scan-results/
+*.log
+portal_app.log
+portal_manager.log

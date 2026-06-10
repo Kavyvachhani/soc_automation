@@ -1,67 +1,579 @@
-name: DevSecOps Pipeline
+name: DevSecOps Security Pipeline
 
+# ─── Triggers ─────────────────────────────────────────────────────────────────
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *"   # Daily at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      severity_threshold:
+        description: "Alert threshold (CRITICAL / HIGH)"
+        default: "HIGH"
+        required: false
 
+permissions:
+  contents: read
+  security-events: write   # for SARIF upload
+
+# ─── Environment ──────────────────────────────────────────────────────────────
+env:
+  PYTHON_VERSION:   "3.12"
+  COMMIT_SHA:       ${{ github.sha }}
+  BRANCH:           ${{ github.ref_name }}
+  ACTOR:            ${{ github.actor }}
+  RUN_ID:           ${{ github.run_id }}
+  ALERT_THRESHOLD:  ${{ github.event.inputs.severity_threshold || 'HIGH' }}
+  S3_REPORT_PREFIX: "security-reports"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — SAST (Bandit + Semgrep)
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  security-scanning:
-    name: Code & Infrastructure Security Scan
+  sast:
+    name: "SAST — Bandit + Semgrep"
     runs-on: ubuntu-latest
+    outputs:
+      bandit_critical: ${{ steps.bandit.outputs.critical }}
+      bandit_high:     ${{ steps.bandit.outputs.high }}
+      semgrep_critical: ${{ steps.semgrep.outputs.critical }}
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
 
-      - name: Install Security Tools
+      - name: Install SAST tools
+        run: pip install --quiet bandit semgrep
+
+      - name: Bandit — Python SAST
+        id: bandit
         run: |
-          pip install --quiet bandit safety
+          mkdir -p scan-results
+          bandit -r scripts/ lambda/ portal/ \
+            -f json -o scan-results/bandit.json \
+            --severity-level low --confidence-level low \
+            -x .venv,__pycache__,build_lambda,build 2>&1 || true
 
-      - name: Static Application Security Testing (SAST) - Bandit
+          # Parse critical/high counts
+          CRITICAL=$(python3 -c "
+          import json, sys
+          try:
+            d = json.load(open('scan-results/bandit.json'))
+            c = sum(1 for i in d.get('results',[]) if i['issue_severity']=='HIGH' and i['issue_confidence']=='HIGH')
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
+          HIGH=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/bandit.json'))
+            h = sum(1 for i in d.get('results',[]) if i['issue_severity'] in ('HIGH','MEDIUM'))
+            print(h)
+          except: print(0)" 2>/dev/null || echo 0)
+
+          echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "high=$HIGH"         >> "$GITHUB_OUTPUT"
+          echo "Bandit: critical=$CRITICAL high=$HIGH"
+          cat scan-results/bandit.json | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          for r in d.get('results',[]):
+            print(f\"  [{r['issue_severity']:8}] {r['test_id']}: {r['issue_text'][:80]}\")"  || true
+
+      - name: Semgrep — OWASP Top 10 rules
+        id: semgrep
         run: |
-          echo "=== Python Code Scanning (Bandit) ===" > security-report.txt
-          bandit -r scripts/ lambda/ portal/ -ll -q >> security-report.txt || true
-          echo -e "\n\n" >> security-report.txt
+          semgrep scan \
+            --config "p/python" \
+            --config "p/owasp-top-ten" \
+            --config "p/secrets" \
+            --config "p/injection" \
+            --json \
+            --output scan-results/semgrep.json \
+            --no-git-ignore \
+            scripts/ lambda/ portal/ 2>&1 || true
 
-      - name: Dependency Vulnerability Scanning (Safety)
-        run: |
-          echo "=== Dependency Scanning (Safety) ===" >> security-report.txt
-          # If a requirements.txt exists, scan it; otherwise skip
-          if [ -f requirements.txt ]; then
-            safety check -r requirements.txt >> security-report.txt || true
-          else
-            echo "No requirements.txt found, skipping safety check." >> security-report.txt
-          fi
-          echo -e "\n\n" >> security-report.txt
+          CRITICAL=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/semgrep.json'))
+            c = sum(1 for r in d.get('results',[]) if r.get('extra',{}).get('severity','') in ('ERROR','CRITICAL'))
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
 
-      - name: Secret Scanning (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          format: 'table'
-          output: 'trivy-report.txt'
-          severity: 'CRITICAL,HIGH'
+          echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "Semgrep critical findings: $CRITICAL"
 
-      - name: Aggregate DevSecOps Report
-        run: |
-          echo "=== Secret Scanning (Trivy) ===" >> security-report.txt
-          cat trivy-report.txt >> security-report.txt || echo "No Trivy output found." >> security-report.txt
-          
-          # Output to console
-          cat security-report.txt
-
-      - name: Upload Security Report Artifact
+      - name: Upload SAST results
         uses: actions/upload-artifact@v4
         with:
-          name: devsecops-security-report
-          path: security-report.txt
+          name: sast-results
+          path: scan-results/
           retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 2 — Dependency CVE Scanning
+# ─────────────────────────────────────────────────────────────────────────────
+  dependencies:
+    name: "Dependencies — pip-audit + Trivy"
+    runs-on: ubuntu-latest
+    outputs:
+      vuln_count: ${{ steps.pip_audit.outputs.vuln_count }}
+      critical_cves: ${{ steps.trivy.outputs.critical_cves }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Install dependency scanners
+        run: pip install --quiet pip-audit
+
+      - name: pip-audit — Python dependency CVEs
+        id: pip_audit
+        run: |
+          mkdir -p scan-results
+          # Scan all requirements files
+          for req in requirements.txt lambda/requirements.txt portal/requirements.txt; do
+            if [ -f "$req" ]; then
+              echo "Scanning $req ..."
+              pip-audit -r "$req" --format json 2>/dev/null >> scan-results/pip_audit_raw.json || true
+            fi
+          done
+
+          # Also scan installed packages
+          pip install --quiet -r lambda/requirements.txt 2>/dev/null || true
+          pip-audit --format json -o scan-results/pip_audit.json 2>/dev/null || true
+
+          VULN=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/pip_audit.json'))
+            vulns = [v for dep in d.get('dependencies',[]) for v in dep.get('vulns',[])]
+            print(len(vulns))
+          except: print(0)" 2>/dev/null || echo 0)
+
+          echo "vuln_count=$VULN" >> "$GITHUB_OUTPUT"
+          echo "pip-audit vulnerabilities found: $VULN"
+
+      - name: Trivy — FS vulnerability scan
+        id: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          format: "json"
+          output: "scan-results/trivy-vuln.json"
+          severity: "CRITICAL,HIGH,MEDIUM"
+          scanners: "vuln,misconfig"
+
+      - name: Parse Trivy critical count
+        run: |
+          CRITICAL=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/trivy-vuln.json'))
+            c = sum(1 for r in d.get('Results',[]) for v in r.get('Vulnerabilities',[]) if v.get('Severity')=='CRITICAL')
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
+          echo "critical_cves=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "Trivy CRITICAL CVEs: $CRITICAL"
+
+      - name: Upload dependency results
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-results
+          path: scan-results/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 3 — Secret & Misconfiguration Scanning
+# ─────────────────────────────────────────────────────────────────────────────
+  secrets-scan:
+    name: "Secrets — Trivy + Gitleaks + detect-secrets"
+    runs-on: ubuntu-latest
+    outputs:
+      secrets_found: ${{ steps.parse.outputs.secrets_found }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Trivy — secret scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          format: "json"
+          output: "trivy-secrets.json"
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+          scanners: "secret"
+
+      - name: Gitleaks — git history secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+      - name: detect-secrets — pattern matching
+        run: |
+          pip install --quiet detect-secrets
+          detect-secrets scan \
+            --exclude-files '\.venv|build_lambda|build|\.git|__pycache__' \
+            > detect-secrets-results.json 2>/dev/null || true
+
+      - name: Parse secret counts
+        id: parse
+        run: |
+          S1=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('trivy-secrets.json'))
+            c = sum(len(r.get('Secrets',[])) for r in d.get('Results',[]))
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
+
+          S2=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('detect-secrets-results.json'))
+            c = sum(len(v) for v in d.get('results',{}).values())
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
+
+          TOTAL=$(( S1 + S2 ))
+          echo "secrets_found=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "Secrets detected — Trivy: $S1, detect-secrets: $S2, Total: $TOTAL"
+
+      - name: Collect results
+        run: |
+          mkdir -p scan-results
+          mv trivy-secrets.json scan-results/ 2>/dev/null || true
+          mv detect-secrets-results.json scan-results/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: secrets-results
+          path: scan-results/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 4 — AI Pentester (Claude + OWASP Top 10)
+# ─────────────────────────────────────────────────────────────────────────────
+  ai-pentest:
+    name: "AI Pentest — Claude OWASP Top 10"
+    runs-on: ubuntu-latest
+    if: ${{ vars.ANTHROPIC_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' }}
+    outputs:
+      critical_findings: ${{ steps.pentest.outputs.critical_findings }}
+      high_findings:     ${{ steps.pentest.outputs.high_findings }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Install AI pentest deps
+        run: pip install --quiet anthropic
+
+      - name: Run AI Pentester
+        id: pentest
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          mkdir -p scan-results
+          python3 scripts/ai_pentest.py \
+            --output scan-results/ai-pentest.json \
+            --scan-dirs lambda/ portal/ scripts/ 2>&1 || true
+
+          CRITICAL=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/ai-pentest.json'))
+            c = sum(1 for f in d.get('findings',[]) if f.get('severity')=='CRITICAL')
+            print(c)
+          except: print(0)" 2>/dev/null || echo 0)
+
+          HIGH=$(python3 -c "
+          import json
+          try:
+            d = json.load(open('scan-results/ai-pentest.json'))
+            h = sum(1 for f in d.get('findings',[]) if f.get('severity') in ('CRITICAL','HIGH'))
+            print(h)
+          except: print(0)" 2>/dev/null || echo 0)
+
+          echo "critical_findings=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "high_findings=$HIGH"          >> "$GITHUB_OUTPUT"
+          echo "AI Pentest — Critical: $CRITICAL, High: $HIGH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-pentest-results
+          path: scan-results/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 5 — Generate PDF Report + Upload to S3 + Alert
+# ─────────────────────────────────────────────────────────────────────────────
+  report:
+    name: "Generate PDF Report + S3 + Alert"
+    runs-on: ubuntu-latest
+    needs: [sast, dependencies, secrets-scan]
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Install report tools
+        run: pip install --quiet fpdf2 boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Download all scan artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results/
+        continue-on-error: true
+
+      - name: Flatten scan results
+        run: |
+          mkdir -p scan-results
+          find all-results/ -type f | while read f; do
+            cp "$f" "scan-results/$(basename $f)" 2>/dev/null || true
+          done
+          ls scan-results/
+
+      - name: Generate PDF report
+        id: pdf
+        env:
+          COMMIT_SHA:   ${{ env.COMMIT_SHA }}
+          BRANCH:       ${{ env.BRANCH }}
+          ACTOR:        ${{ env.ACTOR }}
+          RUN_ID:       ${{ env.RUN_ID }}
+          REPO:         ${{ github.repository }}
+          BANDIT_CRIT:  ${{ needs.sast.outputs.bandit_critical }}
+          BANDIT_HIGH:  ${{ needs.sast.outputs.bandit_high }}
+          SEMGREP_CRIT: ${{ needs.sast.outputs.semgrep_critical }}
+          VULN_COUNT:   ${{ needs.dependencies.outputs.vuln_count }}
+          CRIT_CVES:    ${{ needs.dependencies.outputs.critical_cves }}
+          SECRETS:      ${{ needs.secrets-scan.outputs.secrets_found }}
+        run: |
+          python3 scripts/generate_security_pdf.py \
+            --output security-report.pdf \
+            --scan-dir scan-results/ 2>&1
+
+          echo "PDF generated: $(du -sh security-report.pdf)"
+          echo "pdf_path=security-report.pdf" >> "$GITHUB_OUTPUT"
+
+      - name: Upload PDF to S3 (project/commit/report)
+        id: s3_upload
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y-%m-%d)
+          SHORT_SHA="${{ env.COMMIT_SHA }}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
+          BRANCH="${{ env.BRANCH }}"
+          REPO="${{ github.repository }}"
+          PROJECT=$(echo "$REPO" | cut -d'/' -f2)
+
+          # S3 key structure: security-reports/{project}/{branch}/{date}-{sha}/
+          S3_KEY="${{ env.S3_REPORT_PREFIX }}/${PROJECT}/${BRANCH}/${DATE}-${SHORT_SHA}"
+          BUCKET="${{ secrets.S3_BUCKET }}"
+
+          # Upload PDF report
+          aws s3 cp security-report.pdf \
+            "s3://${BUCKET}/${S3_KEY}/devsecops-report.pdf" \
+            --content-type application/pdf
+
+          # Upload raw scan results
+          for f in scan-results/*.json; do
+            [ -f "$f" ] || continue
+            aws s3 cp "$f" "s3://${BUCKET}/${S3_KEY}/raw/$(basename $f)" \
+              --content-type application/json 2>/dev/null || true
+          done
+
+          # Write commit manifest
+          cat > /tmp/manifest.json << EOF
+          {
+            "project":    "${PROJECT}",
+            "branch":     "${BRANCH}",
+            "commit_sha": "${{ env.COMMIT_SHA }}",
+            "actor":      "${{ env.ACTOR }}",
+            "run_id":     "${{ env.RUN_ID }}",
+            "run_url":    "https://github.com/${{ github.repository }}/actions/runs/${{ env.RUN_ID }}",
+            "scanned_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "s3_prefix":  "s3://${BUCKET}/${S3_KEY}/",
+            "summary": {
+              "bandit_critical": "${{ needs.sast.outputs.bandit_critical }}",
+              "bandit_high":     "${{ needs.sast.outputs.bandit_high }}",
+              "semgrep_critical":"${{ needs.sast.outputs.semgrep_critical }}",
+              "dep_vulns":       "${{ needs.dependencies.outputs.vuln_count }}",
+              "critical_cves":   "${{ needs.dependencies.outputs.critical_cves }}",
+              "secrets_found":   "${{ needs.secrets-scan.outputs.secrets_found }}"
+            }
+          }
+          EOF
+
+          aws s3 cp /tmp/manifest.json \
+            "s3://${BUCKET}/${S3_KEY}/manifest.json" \
+            --content-type application/json
+
+          # Update "latest" pointer for this branch
+          aws s3 cp /tmp/manifest.json \
+            "s3://${BUCKET}/${{ env.S3_REPORT_PREFIX }}/${PROJECT}/${BRANCH}/latest-manifest.json" \
+            --content-type application/json
+
+          echo "s3_key=${S3_KEY}" >> "$GITHUB_OUTPUT"
+          echo "Report uploaded → s3://${BUCKET}/${S3_KEY}/"
+
+      - name: Check for critical findings and alert
+        env:
+          BANDIT_CRIT:  ${{ needs.sast.outputs.bandit_critical }}
+          SEMGREP_CRIT: ${{ needs.sast.outputs.semgrep_critical }}
+          CRIT_CVES:    ${{ needs.dependencies.outputs.critical_cves }}
+          SECRETS:      ${{ needs.secrets-scan.outputs.secrets_found }}
+          S3_KEY:       ${{ steps.s3_upload.outputs.s3_key }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, json
+
+          bandit_c  = int(os.getenv('BANDIT_CRIT',  '0') or 0)
+          semgrep_c = int(os.getenv('SEMGREP_CRIT', '0') or 0)
+          crit_cves = int(os.getenv('CRIT_CVES',    '0') or 0)
+          secrets   = int(os.getenv('SECRETS',      '0') or 0)
+
+          total_critical = bandit_c + semgrep_c + crit_cves + secrets
+          threshold = os.getenv('ALERT_THRESHOLD', 'HIGH')
+
+          print(f"\n{'='*60}")
+          print(f"  SECURITY SCAN SUMMARY")
+          print(f"{'='*60}")
+          print(f"  Bandit SAST critical:      {bandit_c}")
+          print(f"  Semgrep critical:          {semgrep_c}")
+          print(f"  Critical CVEs (deps):      {crit_cves}")
+          print(f"  Secrets detected:          {secrets}")
+          print(f"  Total critical findings:   {total_critical}")
+          print(f"  S3 report:  s3://${{os.getenv('AWS_S3_BUCKET','bucket')}}/{os.getenv('S3_KEY','')}/")
+          print(f"{'='*60}\n")
+
+          if secrets > 0:
+            print("::error::SECRETS DETECTED IN CODEBASE — ROTATE CREDENTIALS IMMEDIATELY")
+
+          if crit_cves > 0:
+            print(f"::error::CRITICAL CVEs found in dependencies: {crit_cves}")
+
+          if bandit_c > 0 or semgrep_c > 0:
+            print(f"::warning::SAST critical issues: Bandit={bandit_c}, Semgrep={semgrep_c}")
+
+          if total_critical > 0 and threshold == 'CRITICAL' and (secrets > 0 or crit_cves > 0):
+            raise SystemExit("CRITICAL security findings — blocking pipeline")
+
+          PYEOF
+
+      - name: Send critical alert email (SES)
+        if: |
+          needs.secrets-scan.outputs.secrets_found > 0 ||
+          needs.dependencies.outputs.critical_cves > 0
+        env:
+          SENDER:    ${{ secrets.SES_SENDER_EMAIL }}
+          RECIPIENT: ${{ secrets.TECH_LEAD_EMAIL }}
+          SECRETS:   ${{ needs.secrets-scan.outputs.secrets_found }}
+          CVE_COUNT: ${{ needs.dependencies.outputs.critical_cves }}
+          S3_KEY:    ${{ steps.s3_upload.outputs.s3_key }}
+          BUCKET:    ${{ secrets.S3_BUCKET }}
+        run: |
+          python3 - << 'PYEOF'
+          import boto3, os, json
+
+          sender    = os.getenv('SENDER', '')
+          recipient = os.getenv('RECIPIENT', '')
+          if not sender or not recipient:
+            print("SES not configured — skipping alert email")
+            raise SystemExit(0)
+
+          secrets  = int(os.getenv('SECRETS', '0') or 0)
+          cves     = int(os.getenv('CVE_COUNT', '0') or 0)
+          s3_key   = os.getenv('S3_KEY', '')
+          bucket   = os.getenv('BUCKET', '')
+          run_url  = f"https://github.com/${{ github.repository }}/actions/runs/${{ env.RUN_ID }}"
+
+          subject = f"🚨 CRITICAL Security Alert — ${{ github.repository }} ({{'${{ env.BRANCH }}' }})"
+
+          body = f"""
+          <html><body style="font-family:-apple-system,sans-serif;padding:24px;color:#333;max-width:700px;">
+          <div style="background:#dc2626;color:#fff;padding:16px 20px;border-radius:8px;margin-bottom:20px;">
+            <h2 style="margin:0;">🚨 Critical Security Findings Detected</h2>
+          </div>
+          <table style="border-collapse:collapse;width:100%;margin-bottom:20px;">
+            <tr style="background:#fef2f2;"><td style="padding:10px;font-weight:bold;border:1px solid #fca5a5;">Secrets Found</td>
+              <td style="padding:10px;border:1px solid #fca5a5;color:#dc2626;font-weight:bold;">{secrets}</td></tr>
+            <tr><td style="padding:10px;font-weight:bold;border:1px solid #fca5a5;">Critical CVEs</td>
+              <td style="padding:10px;border:1px solid #fca5a5;color:#dc2626;font-weight:bold;">{cves}</td></tr>
+            <tr style="background:#fef2f2;"><td style="padding:10px;font-weight:bold;border:1px solid #fca5a5;">Branch</td>
+              <td style="padding:10px;border:1px solid #fca5a5;">${{ env.BRANCH }}</td></tr>
+            <tr><td style="padding:10px;font-weight:bold;border:1px solid #fca5a5;">Commit</td>
+              <td style="padding:10px;border:1px solid #fca5a5;font-family:monospace;">${{ env.COMMIT_SHA }}</td></tr>
+            <tr style="background:#fef2f2;"><td style="padding:10px;font-weight:bold;border:1px solid #fca5a5;">Actor</td>
+              <td style="padding:10px;border:1px solid #fca5a5;">${{ env.ACTOR }}</td></tr>
+          </table>
+          <div style="margin-bottom:16px;">
+            <a href="{run_url}" style="background:#1d4ed8;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:bold;">View Pipeline Run →</a>
+          </div>
+          <p style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:12px;">
+            <strong>Full PDF report:</strong> s3://{bucket}/{s3_key}/devsecops-report.pdf<br>
+            <strong>Action required:</strong> Rotate any exposed credentials immediately. Review CVEs and patch dependencies.
+          </p>
+          <p style="color:#6b7280;font-size:12px;">Attest DevSecOps Platform — SOC 2 Compliance</p>
+          </body></html>
+          """
+
+          ses = boto3.client('ses', region_name=os.getenv('AWS_DEFAULT_REGION','us-east-1'))
+          try:
+            ses.send_email(
+              Source=sender,
+              Destination={'ToAddresses': [recipient]},
+              Message={
+                'Subject': {'Data': subject, 'Charset': 'UTF-8'},
+                'Body':    {'Html': {'Data': body, 'Charset': 'UTF-8'}},
+              }
+            )
+            print(f"Critical alert email sent to {recipient}")
+          except Exception as e:
+            print(f"SES alert failed (non-fatal): {e}")
+          PYEOF
+        continue-on-error: true
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devsecops-report-pdf
+          path: security-report.pdf
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "## 🛡️ DevSecOps Security Scan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scanner | Critical | High |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bandit SAST | ${{ needs.sast.outputs.bandit_critical }} | ${{ needs.sast.outputs.bandit_high }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Semgrep OWASP | ${{ needs.sast.outputs.semgrep_critical }} | — |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency CVEs | ${{ needs.dependencies.outputs.critical_cves }} | ${{ needs.dependencies.outputs.vuln_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets | ${{ needs.secrets-scan.outputs.secrets_found }} | — |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📄 **Full PDF Report:** stored in S3 under \`${{ env.S3_REPORT_PREFIX }}/\`" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **Commit:** \`${{ env.COMMIT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
