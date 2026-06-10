@@ -17,7 +17,7 @@ import tempfile
 import boto3
 
 # Configuration
-S3_BUCKET = os.getenv("S3_BUCKET", "attest-vault")
+S3_BUCKET = os.getenv("S3_BUCKET", "attest-vault-669167971016")
 MOCK_EMPLOYEES = [
     {"emp_id": "EMP-ABCD1234", "name": "Alice Developer"},
     {"emp_id": "EMP-XYZ9876", "name": "Bob Engineer"},
