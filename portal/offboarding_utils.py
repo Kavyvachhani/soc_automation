@@ -5,7 +5,7 @@ import datetime
 import os
 import boto3
 
-ENABLE_REAL = os.environ.get("ENABLE_REAL_PROVISIONING", "false").lower() == "true"
+ENABLE_REAL = os.environ.get("ENABLE_REAL_PROVISIONING", "true").lower() == "true"
 
 def get_employee_access_audit(emp_id: str, employee_data: dict) -> dict:
     """Audit AWS for existing active access for an employee."""

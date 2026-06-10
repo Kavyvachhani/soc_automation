@@ -33,7 +33,7 @@ import boto3
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
-ENABLE_REAL = os.environ.get("ENABLE_REAL_PROVISIONING", "false").lower() == "true"
+ENABLE_REAL = os.environ.get("ENABLE_REAL_PROVISIONING", "true").lower() == "true"
 ENABLE_SES = os.environ.get("ENABLE_SES", "false").lower() == "true"
 SES_SENDER = os.environ.get("SES_SENDER_EMAIL", "")
 TECH_LEAD_EMAIL = os.environ.get("TECH_LEAD_EMAIL", "")
