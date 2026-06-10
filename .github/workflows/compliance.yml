@@ -83,6 +83,7 @@ jobs:
             --upload
 
       - name: Generate Compliance PDF
+        if: always()
         run: |
           python scripts/generate_compliance_pdf.py \
             --summary /tmp/reports/compliance_summary_latest.json \
