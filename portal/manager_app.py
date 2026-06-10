@@ -16,7 +16,18 @@ import streamlit as st
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-MOCK_MODE: bool = False
+def detect_mock_mode() -> bool:
+    env_val = os.getenv("MOCK_MODE")
+    if env_val is not None:
+        return env_val.lower() == "true"
+    try:
+        import boto3
+        session = boto3.Session()
+        return session.get_credentials() is None
+    except Exception:
+        return True
+
+MOCK_MODE: bool = detect_mock_mode()
 BASE_DIR = Path(os.getenv("DATA_DIR", "./data"))
 BUCKET_NAME: str = os.getenv("S3_BUCKET", "attest-vault")
 API_URL = os.getenv("API_URL", "http://localhost:8501") # Mock API url or lambda

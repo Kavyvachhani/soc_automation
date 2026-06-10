@@ -24,7 +24,18 @@ import yaml
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-MOCK_MODE: bool = False
+def detect_mock_mode() -> bool:
+    env_val = os.getenv("MOCK_MODE")
+    if env_val is not None:
+        return env_val.lower() == "true"
+    try:
+        import boto3
+        session = boto3.Session()
+        return session.get_credentials() is None
+    except Exception:
+        return True
+
+MOCK_MODE: bool = detect_mock_mode()
 BASE_DIR = Path(os.getenv("DATA_DIR", "./data"))
 REPO_ROOT = Path(__file__).parent.parent
 POLICIES_DIR = Path(os.getenv("POLICIES_DIR", str(REPO_ROOT / "policies")))
