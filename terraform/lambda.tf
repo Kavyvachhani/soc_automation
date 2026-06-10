@@ -180,6 +180,9 @@ resource "aws_lambda_function" "signed_processor" {
       SES_SENDER_EMAIL = var.ses_sender_email
       TECH_LEAD_EMAIL  = var.tech_lead_email
       APPROVAL_API_URL = aws_apigatewayv2_api.approval.api_endpoint
+      # Named to match GitHub secret names used by portal
+      PROJECT_GITHUB_TOKEN = var.github_token
+      PROJECT_GITHUB_ORG   = var.github_org
     }
   }
 
@@ -200,17 +203,18 @@ resource "aws_lambda_function" "approval_handler" {
 
   environment {
     variables = {
-      S3_BUCKET               = var.evidence_bucket_name
+      S3_BUCKET                = var.evidence_bucket_name
       ENABLE_REAL_PROVISIONING = var.enable_real_provisioning ? "true" : "false"
-      ENABLE_SES              = var.enable_ses ? "true" : "false"
-      SES_SENDER_EMAIL        = var.ses_sender_email
-      TECH_LEAD_EMAIL         = var.tech_lead_email
-      READONLY_POLICY_ARN     = var.readonly_policy_arn
-      DEVELOPER_POLICY_ARN    = var.developer_policy_arn
-      PORTAL_URL              = var.portal_url
-      GITHUB_TOKEN            = var.github_token
-      GITHUB_ORG              = var.github_org
-      GITHUB_REPO             = var.github_repo
+      ENABLE_SES               = var.enable_ses ? "true" : "false"
+      SES_SENDER_EMAIL         = var.ses_sender_email
+      TECH_LEAD_EMAIL          = var.tech_lead_email
+      READONLY_POLICY_ARN      = var.readonly_policy_arn
+      DEVELOPER_POLICY_ARN     = var.developer_policy_arn
+      PORTAL_URL               = var.portal_url
+      # Named to match GitHub secret names used by portal
+      PROJECT_GITHUB_TOKEN = var.github_token
+      PROJECT_GITHUB_ORG   = var.github_org
+      GITHUB_REPO          = var.github_repo
     }
   }
 

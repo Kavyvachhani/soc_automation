@@ -1,8 +1,8 @@
 name: Provisioning — Approval-Gated Access Grant
 
 # Triggered by:
-#   1. repository_dispatch from signed_processor Lambda (event_type: nda-signed)
-#   2. manual workflow_dispatch for re-runs / testing
+#   1. repository_dispatch  — fired by signed_processor Lambda after NDA is signed
+#   2. workflow_dispatch    — manual trigger for re-runs / testing
 on:
   repository_dispatch:
     types: [nda-signed]
@@ -13,20 +13,18 @@ on:
         required: true
         type: string
 
-# OIDC token for AWS + permission to create issues
 permissions:
-  id-token: write
   contents: read
-  issues: write
+  issues:   write
 
 jobs:
   provision:
-    name: Provision Access for ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+    name: Provision Access
     runs-on: ubuntu-latest
 
-    # ─── APPROVAL GATE ───────────────────────────────────────────────────────
-    # The "provisioning" Environment MUST have at least one required reviewer.
-    # Nothing below runs until a Tech Lead clicks "Approve" in the Actions UI.
+    # ── APPROVAL GATE ─────────────────────────────────────────────────────────
+    # The "provisioning" Environment must have Kavyvachhani as required reviewer.
+    # NOTHING below runs until the reviewer clicks Approve in the Actions UI.
     environment: provisioning
 
     env:
@@ -36,81 +34,85 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (via Access Keys)
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Configure AWS credentials (via OIDC Role)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      - name: Install Python deps (for inline scripts)
+        run: pip install --quiet boto3 pyyaml fpdf2
 
-      # ── Primary path: invoke approval_handler Lambda directly ──────────────
-      # This mirrors what the SES email approve-link does, but driven from
-      # the GitHub Actions approval gate instead. The Lambda creates the IAM
-      # user, generates evidence PDFs, and writes all files to S3.
-      - name: Invoke approval_handler Lambda
-        id: invoke_approval
+      # ── Step 1: Read or create approval token ─────────────────────────────
+      - name: Prepare approval token
+        id: token
         run: |
           set -euo pipefail
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-approval-handler"
           BUCKET="${{ secrets.S3_BUCKET }}"
           EMP_ID="${{ env.EMP_ID }}"
-          APPROVER="${{ github.actor }}"
-
-          # Read the approval token from S3
           PENDING_KEY="employees/${EMP_ID}/pending-approval.json"
+
+          # Try to read existing token
           TOKEN=$(aws s3 cp "s3://${BUCKET}/${PENDING_KEY}" - 2>/dev/null \
             | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" \
             || echo "")
 
+          # If no token exists yet, create one (manual dispatch case)
           if [ -z "$TOKEN" ]; then
-            echo "⚠️  No pending-approval.json found — will generate token inline"
+            echo "No pending-approval.json found — creating synthetic one"
             TOKEN=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
-            # Write a synthetic pending-approval.json so Lambda can validate it
-            python3 -c "
+            python3 << PYEOF
           import json, boto3, datetime
-          s3 = boto3.client('s3')
+          s3 = boto3.client('s3', region_name='${{ secrets.AWS_REGION }}')
           data = {
-            'emp_id': '$EMP_ID',
-            'token': '$TOKEN',
-            'status': 'pending',
-            'created_at': datetime.datetime.utcnow().isoformat() + 'Z'
+              'emp_id':     '$EMP_ID',
+              'token':      '$TOKEN',
+              'status':     'pending',
+              'created_at': datetime.datetime.utcnow().isoformat() + 'Z'
           }
           s3.put_object(
-            Bucket='$BUCKET',
-            Key='employees/$EMP_ID/pending-approval.json',
-            Body=json.dumps(data, indent=2).encode(),
-            ContentType='application/json'
+              Bucket='$BUCKET',
+              Key='$PENDING_KEY',
+              Body=json.dumps(data, indent=2).encode(),
+              ContentType='application/json'
           )
-          print('Synthetic pending-approval.json written')
-            "
+          print('Created pending-approval.json')
+          PYEOF
           fi
 
-          echo "Approver: $APPROVER | EMP_ID: $EMP_ID"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "Token ready: ${TOKEN:0:8}..."
 
-          # Build synthetic API Gateway event (matching what the HTTP GET /approve does)
-          PAYLOAD=$(python3 -c "
-          import json, sys
+      # ── Step 2: Invoke approval_handler Lambda ────────────────────────────
+      - name: Invoke approval_handler Lambda
+        id: invoke_approval
+        run: |
+          set -euo pipefail
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-approval_handler"
+          EMP_ID="${{ env.EMP_ID }}"
+          TOKEN="${{ steps.token.outputs.token }}"
+          APPROVER="${{ github.actor }}"
+
+          echo "Function : $FUNCTION_NAME"
+          echo "EMP_ID   : $EMP_ID"
+          echo "Approver : $APPROVER"
+
+          PAYLOAD=$(python3 << PYEOF
+          import json
           event = {
-            'queryStringParameters': {
-              'token':    sys.argv[1],
-              'emp_id':   sys.argv[2],
-              'action':   'approve',
-              'approver': sys.argv[3],
-            },
-            'requestContext': {'http': {'method': 'GET'}}
+              "queryStringParameters": {
+                  "token":    "$TOKEN",
+                  "emp_id":   "$EMP_ID",
+                  "action":   "approve",
+                  "approver": "$APPROVER"
+              },
+              "requestContext": {"http": {"method": "GET"}}
           }
           print(json.dumps(event))
-          " "$TOKEN" "$EMP_ID" "$APPROVER")
+          PYEOF
+          )
 
-          echo "Invoking Lambda: $FUNCTION_NAME"
           aws lambda invoke \
             --function-name "$FUNCTION_NAME" \
             --payload "$PAYLOAD" \
@@ -121,45 +123,38 @@ jobs:
           echo "=== Lambda Response ==="
           cat /tmp/approval-response.json
 
-          # Check for Lambda-level errors
-          if python3 -c "
+          python3 << 'PYEOF'
           import json, sys
           r = json.load(open('/tmp/approval-response.json'))
           sc = r.get('statusCode', 200)
-          if sc not in (200, 201):
-            print(f'ERROR: Lambda returned statusCode={sc}')
-            sys.exit(1)
           body = r.get('body', '')
-          if 'error' in body.lower() and 'internal error' in body.lower():
-            print('ERROR: Lambda body contains error')
-            sys.exit(1)
-          print('Lambda completed successfully')
-          "; then
-            echo "✅ Lambda approval_handler invoked successfully"
-          else
-            echo "❌ Lambda invocation returned an error — falling back to inline provisioning"
-            exit 1
-          fi
+          if sc not in (200, 201):
+              print(f'ERROR: statusCode={sc}')
+              sys.exit(1)
+          if 'Internal error' in body or 'errorMessage' in body:
+              print(f'ERROR: Lambda body contains error')
+              sys.exit(1)
+          print(f'Lambda completed OK — statusCode={sc}')
+          PYEOF
 
-      # ── Fallback: run inline provisioning if Lambda fails ──────────────────
-      - name: Fallback — run inline provisioning
+      # ── Step 3: Fallback inline provisioning if Lambda fails ──────────────
+      - name: Fallback — inline provisioning
         if: failure() && steps.invoke_approval.outcome == 'failure'
         run: |
           set -euo pipefail
-          pip install --quiet pyyaml boto3 fpdf2
-
-          mkdir -p data/employees/${{ env.EMP_ID }}
+          mkdir -p "data/employees/${{ env.EMP_ID }}"
           aws s3 sync \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/" \
             "data/employees/${{ env.EMP_ID }}/"
-          echo "Downloaded employee folder contents:"
+
           ls -la "data/employees/${{ env.EMP_ID }}/"
 
-          REAL_FLAG=""
-          if [ "${{ secrets.ENABLE_REAL_PROVISIONING || 'true' }}" = "true" ]; then
-            REAL_FLAG="--real"
+          REAL_FLAG="--real"
+          if [ "${{ secrets.ENABLE_REAL_PROVISIONING }}" = "false" ]; then
+            REAL_FLAG=""
           fi
-          python scripts/provision.py "${{ env.EMP_ID }}" \
+
+          python3 scripts/provision.py "${{ env.EMP_ID }}" \
             --approver "${{ github.actor }}" \
             --data-dir "./data" \
             $REAL_FLAG
@@ -168,58 +163,56 @@ jobs:
             "data/employees/${{ env.EMP_ID }}/" \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/"
 
-      # ── Verify evidence landed in S3 ───────────────────────────────────────
-      - name: Verify evidence files in S3
+      # ── Step 4: Verify evidence files in S3 ──────────────────────────────
+      - name: Verify evidence in S3
         run: |
           set -euo pipefail
           BUCKET="${{ secrets.S3_BUCKET }}"
-          EMP_ID="${{ env.EMP_ID }}"
-          PREFIX="employees/${EMP_ID}"
-
-          echo "Verifying evidence files for ${EMP_ID}..."
+          PREFIX="employees/${{ env.EMP_ID }}"
+          echo "Checking evidence for ${{ env.EMP_ID }} ..."
           for KEY in access-granted.csv aws-access-credentials.csv evidence-index.json; do
             aws s3api head-object \
               --bucket "$BUCKET" \
               --key "${PREFIX}/${KEY}" \
               --no-cli-pager \
-              && echo "✅ ${KEY}" \
-              || echo "⚠️  Missing: ${KEY}"
+              && echo "  OK  ${KEY}" \
+              || echo "  WARN: ${KEY} not found yet"
           done
 
-      - name: Create notification issue
+      # ── Step 5: Create GitHub issue as audit record ───────────────────────
+      - name: Create audit issue
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Try to get employee data from S3 (may not be available in fallback mode)
           EMP_NAME="Unknown"
           ROLE="unknown"
-
           TMPFILE=$(mktemp)
-          if aws s3 cp "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/employee.json" "$TMPFILE" 2>/dev/null; then
+
+          if aws s3 cp \
+            "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/employee.json" \
+            "$TMPFILE" 2>/dev/null; then
             EMP_NAME=$(python3 -c "import json; d=json.load(open('$TMPFILE')); print(d.get('name','Unknown'))")
             ROLE=$(python3 -c "import json; d=json.load(open('$TMPFILE')); print('developer' if d.get('experience_level')=='experienced' else 'fresher')")
           fi
 
           gh issue create \
-            --title "✅ Access Provisioned: ${EMP_NAME} (${{ env.EMP_ID }})" \
-            --body "## Onboarding Complete
+            --title "Access Provisioned: ${EMP_NAME} (${{ env.EMP_ID }})" \
+            --body "## SOC 2 Onboarding Complete
 
           | Field | Value |
-          |-------|-------|
+          |---|---|
           | **Employee** | ${EMP_NAME} |
           | **Employee ID** | ${{ env.EMP_ID }} |
           | **Role** | ${ROLE} |
           | **Approved by** | @${{ github.actor }} |
           | **Provisioned at** | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
-          | **Run** | [Actions Run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+          | **Run** | [Actions #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-          ### Evidence Files
-          - \`access-granted.csv\` — IAM policy grants
-          - \`aws-access-credentials.csv\` — Console login + access key
-          - \`onboarding-report.pdf\` — Combined compliance report with selfie
-          - \`evidence-index.json\` — Full audit index
-
-          > All files are stored in the encrypted S3 evidence vault." \
-            --label "onboarding,automated" \
-            || echo "Note: Could not create issue (label may not exist — create 'onboarding' and 'automated' labels)"
+          ### Evidence stored in S3 vault
+          - access-granted.csv
+          - aws-access-credentials.csv
+          - onboarding-report.pdf
+          - combined-evidence.pdf
+          - evidence-index.json" \
+            || echo "Issue creation skipped (labels may be missing)"

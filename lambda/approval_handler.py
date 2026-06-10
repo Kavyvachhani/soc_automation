@@ -104,12 +104,12 @@ def generate_compliant_password() -> str:
 
 
 def approve_github_actions_run(emp_id: str) -> bool:
-    github_token = os.environ.get("GITHUB_TOKEN", "")
-    github_org = os.environ.get("GITHUB_ORG", "")
-    github_repo = os.environ.get("GITHUB_REPO", "attest")
+    github_token = os.environ.get("PROJECT_GITHUB_TOKEN", "")
+    github_org = os.environ.get("PROJECT_GITHUB_ORG", "")
+    github_repo = os.environ.get("GITHUB_REPO", "soc_automation")
 
     if not github_token or not github_org:
-        print("[approve_gha] GITHUB_TOKEN or GITHUB_ORG not set; cannot approve workflow run.")
+        print("[approve_gha] PROJECT_GITHUB_TOKEN or PROJECT_GITHUB_ORG not set; cannot approve workflow run.")
         return False
 
     import urllib.request

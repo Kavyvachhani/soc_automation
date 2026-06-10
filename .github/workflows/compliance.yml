@@ -1,13 +1,12 @@
 name: Compliance Evidence Collection
 
-# Run weekly and on-demand to collect infrastructure compliance evidence
+# Weekly SOC 2 evidence snapshots + on-demand
 on:
   schedule:
-    - cron: "0 6 * * 1"   # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"   # Every Monday 06:00 UTC
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -19,20 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (via Access Keys)
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
-
-      - name: Configure AWS credentials (via OIDC Role)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
       - name: Verify S3 vault configuration
         run: |
@@ -48,36 +39,38 @@ jobs:
           aws s3api get-public-access-block --bucket "$BUCKET" --no-cli-pager
 
           echo "=== Bucket policy ==="
-          aws s3api get-bucket-policy --bucket "$BUCKET" --output text --no-cli-pager || echo "No bucket policy"
+          aws s3api get-bucket-policy --bucket "$BUCKET" \
+            --output text --no-cli-pager || echo "No bucket policy set"
 
-      - name: Snapshot IAM policies for GitHub Actions role
+      - name: Snapshot IAM role policies
         run: |
           set -euo pipefail
-          ROLE_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-github-actions"
-          echo "=== Attached managed policies ==="
-          aws iam list-attached-role-policies --role-name "$ROLE_NAME" --no-cli-pager || true
+          ROLE_NAME="${{ secrets.PROJECT_NAME }}-github-actions"
+          echo "=== Attached managed policies for $ROLE_NAME ==="
+          aws iam list-attached-role-policies \
+            --role-name "$ROLE_NAME" --no-cli-pager || echo "Role not found"
 
           echo "=== Inline policies ==="
-          aws iam list-role-policies --role-name "$ROLE_NAME" --no-cli-pager || true
+          aws iam list-role-policies \
+            --role-name "$ROLE_NAME" --no-cli-pager || echo "Role not found"
 
-      - name: Snapshot Lambda configuration
+      - name: Snapshot Lambda configurations
         run: |
           set -euo pipefail
-          PREFIX="${{ secrets.PROJECT_NAME || 'attest' }}"
-          for fn in offer-processor signed-processor; do
-            echo "=== ${PREFIX}-${fn} ==="
+          PREFIX="${{ secrets.PROJECT_NAME }}"
+          for FN in offer_processor signed_processor approval_handler; do
+            echo "=== ${PREFIX}-${FN} ==="
             aws lambda get-function-configuration \
-              --function-name "${PREFIX}-${fn}" \
+              --function-name "${PREFIX}-${FN}" \
               --query '{Runtime:Runtime,MemorySize:MemorySize,Timeout:Timeout,LastModified:LastModified}' \
               --output table \
               --no-cli-pager || echo "Function not found"
           done
 
-      - name: Upload compliance snapshot to vault
+      - name: Upload snapshot to S3 vault
         run: |
           set -euo pipefail
           TIMESTAMP=$(date -u +%Y-%m-%dT%H%M%SZ)
-          SNAPSHOT="compliance-snapshots/${TIMESTAMP}.json"
 
           cat > /tmp/snapshot.json << EOF
           {
@@ -85,18 +78,15 @@ jobs:
             "collector": "github-actions",
             "run_id": "${{ github.run_id }}",
             "checks": [
-              "s3-versioning",
-              "s3-encryption",
-              "s3-public-access-block",
-              "s3-tls-policy",
-              "iam-role-policies",
-              "lambda-configuration"
+              "s3-versioning", "s3-encryption", "s3-public-access-block",
+              "s3-tls-policy", "iam-role-policies", "lambda-configuration"
             ],
             "status": "collected"
           }
           EOF
 
           aws s3 cp /tmp/snapshot.json \
-            "s3://${{ secrets.S3_BUCKET }}/${SNAPSHOT}" \
+            "s3://${{ secrets.S3_BUCKET }}/compliance-snapshots/${TIMESTAMP}.json" \
             --content-type "application/json"
-          echo "Uploaded: s3://${{ secrets.S3_BUCKET }}/${SNAPSHOT}"
+
+          echo "Snapshot uploaded: compliance-snapshots/${TIMESTAMP}.json"

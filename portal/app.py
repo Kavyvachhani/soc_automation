@@ -119,12 +119,12 @@ def get_approval_api_url() -> str:
 def dispatch_to_github(emp_id: str, event_type: str) -> None:
     import urllib.request
     import urllib.error
-    github_token = os.environ.get("GITHUB_TOKEN", "")
-    github_org = os.environ.get("GITHUB_ORG", "")
-    github_repo = os.environ.get("GITHUB_REPO", "attest")
+    github_token = os.environ.get("PROJECT_GITHUB_TOKEN", "")
+    github_org = os.environ.get("PROJECT_GITHUB_ORG", "")
+    github_repo = os.environ.get("GITHUB_REPO", "soc_automation")
 
     if not github_token or not github_org:
-        print(f"[dispatch] GITHUB_TOKEN or GITHUB_ORG not set; skipping dispatch for {event_type}")
+        print(f"[dispatch] PROJECT_GITHUB_TOKEN or PROJECT_GITHUB_ORG not set; skipping dispatch for {event_type}")
         return
 
     url = f"https://api.github.com/repos/{github_org}/{github_repo}/dispatches"

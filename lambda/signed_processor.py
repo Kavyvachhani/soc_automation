@@ -171,13 +171,13 @@ def dispatch_to_github(emp_id: str) -> None:
     provisioning workflow (behind an Environment approval gate).
     Uses only stdlib — no third-party HTTP library required in Lambda.
     """
-    github_token = os.environ.get("GITHUB_TOKEN", "")
-    github_org = os.environ.get("GITHUB_ORG", "")
-    github_repo = os.environ.get("GITHUB_REPO", "attest")
+    github_token = os.environ.get("PROJECT_GITHUB_TOKEN", "")
+    github_org = os.environ.get("PROJECT_GITHUB_ORG", "")
+    github_repo = os.environ.get("GITHUB_REPO", "soc_automation")
 
     if not github_token or not github_org:
         print(
-            "[signed_processor] GITHUB_TOKEN or GITHUB_ORG not set; "
+            "[signed_processor] PROJECT_GITHUB_TOKEN or PROJECT_GITHUB_ORG not set; "
             "skipping repository_dispatch (set env vars in Lambda config)."
         )
         return

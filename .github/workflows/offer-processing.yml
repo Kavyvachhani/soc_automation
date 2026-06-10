@@ -6,17 +6,16 @@ on:
   workflow_dispatch:
     inputs:
       emp_id:
-        description: "Employee ID"
+        description: "Employee ID (e.g. EMP-ABCD1234)"
         required: true
         type: string
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
   process-offer:
-    name: Process Offer Letter for ${{ github.event.client_payload.emp_id || inputs.emp_id }}
+    name: Process Offer Letter
     runs-on: ubuntu-latest
 
     env:
@@ -26,123 +25,112 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (via Access Keys)
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Configure AWS credentials (via OIDC Role)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
-
-      # ── Invoke offer_processor Lambda directly (primary path) ──────────────
-      # The Lambda is already deployed and triggered by S3 ObjectCreated, but
-      # invoking it here ensures the workflow stays in sync and provides logs.
+      # ── Step 1: Invoke offer_processor Lambda (primary path) ───────────────
+      # Sends a synthetic S3 ObjectCreated event so Lambda extracts employee
+      # data, fills the NDA template, and writes outputs back to S3.
       - name: Invoke offer_processor Lambda
         id: invoke_lambda
         run: |
           set -euo pipefail
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-offer-processor"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-offer_processor"
           BUCKET="${{ secrets.S3_BUCKET }}"
           EMP_ID="${{ env.EMP_ID }}"
 
-          # Build a synthetic S3 event payload identical to what S3 sends
-          PAYLOAD=$(python3 -c "
-          import json, sys
-          bucket = sys.argv[1]
-          emp_id = sys.argv[2]
-          key = f'employees/{emp_id}/offer-letter.pdf'
+          echo "EMP_ID: $EMP_ID"
+          echo "Bucket: $BUCKET"
+          echo "Function: $FUNCTION_NAME"
+
+          # Build synthetic S3 event
+          PAYLOAD=$(python3 << PYEOF
+          import json
           event = {
-            'Records': [{
-              's3': {
-                'bucket': {'name': bucket},
-                'object': {'key': key, 'size': 0}
+            "Records": [{
+              "s3": {
+                "bucket": {"name": "$BUCKET"},
+                "object": {"key": "employees/$EMP_ID/offer-letter.pdf", "size": 1}
               }
             }]
           }
           print(json.dumps(event))
-          " "$BUCKET" "$EMP_ID")
+          PYEOF
+          )
 
-          echo "Invoking Lambda: $FUNCTION_NAME"
-          RESULT=$(aws lambda invoke \
+          aws lambda invoke \
             --function-name "$FUNCTION_NAME" \
             --payload "$PAYLOAD" \
             --cli-binary-format raw-in-base64-out \
-            --log-type Tail \
             --no-cli-pager \
-            /tmp/lambda-response.json 2>&1)
-
-          # Print Lambda logs (base64-encoded in Tail mode)
-          LOG_RESULT=$(aws lambda invoke \
-            --function-name "$FUNCTION_NAME" \
-            --payload "$PAYLOAD" \
-            --cli-binary-format raw-in-base64-out \
-            --log-type Tail \
-            --query 'LogResult' \
-            --output text \
-            --no-cli-pager \
-            /dev/null 2>/dev/null || true)
+            /tmp/lambda-response.json
 
           echo "=== Lambda Response ==="
           cat /tmp/lambda-response.json
 
-          # Check for function error
-          if grep -q '"FunctionError"' <<< "$RESULT" || grep -q '"errorMessage"' /tmp/lambda-response.json 2>/dev/null; then
-            echo "Lambda invocation reported an error"
+          # Fail if Lambda returned a function error
+          if python3 -c "
+          import json, sys
+          r = json.load(open('/tmp/lambda-response.json'))
+          if 'errorMessage' in r or 'FunctionError' in r:
+              print('ERROR:', r.get('errorMessage', 'FunctionError'))
+              sys.exit(1)
+          print('Lambda OK, statusCode:', r.get('statusCode', 200))
+          "; then
+            echo "Lambda invoked successfully"
+          else
+            echo "Lambda returned error — will fall back to inline"
             exit 1
           fi
 
-          echo "Lambda invoked successfully"
-
-      # ── Fallback: run inline if Lambda invocation fails ────────────────────
-      - name: Fallback — run offer processor inline
+      # ── Step 2: Fallback — run inline if Lambda is unavailable ────────────
+      - name: Fallback — inline offer processing
         if: failure() && steps.invoke_lambda.outcome == 'failure'
         run: |
           set -euo pipefail
           pip install --quiet pypdf fpdf2 pyyaml python-dateutil boto3 anthropic
 
-          mkdir -p data/employees/${{ env.EMP_ID }}
+          mkdir -p "data/employees/${{ env.EMP_ID }}"
           aws s3 cp \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/offer-letter.pdf" \
             "data/employees/${{ env.EMP_ID }}/offer-letter.pdf"
 
-          export ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-          python3 -c "
+          python3 - << 'PYEOF'
           import sys
-          sys.path.append('lambda')
+          sys.path.insert(0, 'lambda')
           from offer_processor import process_offer_letter_local
           from pathlib import Path
+          import os
+          emp_id = os.environ['EMP_ID']
           process_offer_letter_local(
-            'data/employees/${{ env.EMP_ID }}/offer-letter.pdf',
-            '${{ env.EMP_ID }}',
-            Path('data')
+              f'data/employees/{emp_id}/offer-letter.pdf',
+              emp_id,
+              Path('data')
           )
-          "
+          PYEOF
+
           aws s3 sync \
             "data/employees/${{ env.EMP_ID }}/" \
             "s3://${{ secrets.S3_BUCKET }}/employees/${{ env.EMP_ID }}/"
 
-      # ── Verify outputs landed in S3 ────────────────────────────────────────
-      - name: Verify S3 outputs exist
+      # ── Step 3: Verify outputs landed in S3 ───────────────────────────────
+      - name: Verify S3 outputs
         run: |
           set -euo pipefail
           BUCKET="${{ secrets.S3_BUCKET }}"
-          EMP_ID="${{ env.EMP_ID }}"
-          PREFIX="employees/${EMP_ID}"
+          PREFIX="employees/${{ env.EMP_ID }}"
 
-          echo "Checking S3 outputs for ${EMP_ID}..."
+          echo "Checking outputs for ${{ env.EMP_ID }} ..."
           for KEY in employee.json nda-content.txt nda-unsigned.pdf; do
             aws s3api head-object \
               --bucket "$BUCKET" \
               --key "${PREFIX}/${KEY}" \
               --no-cli-pager \
-              && echo "✅ ${KEY}" \
-              || { echo "❌ MISSING: ${KEY}"; exit 1; }
+              && echo "  OK  ${KEY}" \
+              || { echo "  MISSING: ${KEY}"; exit 1; }
           done
-          echo "All expected outputs verified in S3."
+          echo "All S3 outputs verified."

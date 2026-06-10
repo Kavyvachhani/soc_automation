@@ -7,10 +7,12 @@ on:
       - "lambda/**"
   workflow_dispatch:
 
-# Minimum permissions: OIDC token + read code
 permissions:
-  id-token: write
   contents: read
+
+env:
+  AWS_REGION:   ${{ secrets.AWS_REGION }}
+  PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
 
 jobs:
   deploy:
@@ -28,20 +30,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (via Access Keys)
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
-
-      - name: Configure AWS credentials (via OIDC Role)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region:     ${{ secrets.AWS_REGION || 'us-east-1' }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -53,45 +47,44 @@ jobs:
       - name: Build Lambda deployment package
         run: |
           set -euo pipefail
-          BUILD_DIR="build/${{ matrix.function }}"
+          FUNC="${{ matrix.function }}"
+          BUILD_DIR="build/${FUNC}"
           mkdir -p "$BUILD_DIR"
 
-          # Install Python dependencies into the build directory
-          pip install --quiet \
-            -r lambda/requirements.txt \
-            -t "$BUILD_DIR/"
+          echo "Installing dependencies into $BUILD_DIR ..."
+          pip install --quiet -r lambda/requirements.txt -t "$BUILD_DIR/"
 
-          # Copy function source + templates
-          cp lambda/${{ matrix.function }}.py "$BUILD_DIR/"
+          # Copy function source and NDA template
+          cp "lambda/${FUNC}.py" "$BUILD_DIR/"
           cp -r lambda/templates "$BUILD_DIR/"
 
-          # Create the zip (Lambda needs the files at the root)
+          # Zip everything at root level (Lambda requires this)
           cd "$BUILD_DIR"
-          zip -r "../../${{ matrix.function }}.zip" . -x "*.pyc" -x "__pycache__/*"
+          zip -r "../../${FUNC}.zip" . -x "*.pyc" -x "__pycache__/*"
           cd ../..
 
-          echo "Package size: $(du -sh ${{ matrix.function }}.zip | cut -f1)"
+          echo "Package size: $(du -sh ${FUNC}.zip | cut -f1)"
 
       - name: Deploy to AWS Lambda
         run: |
           set -euo pipefail
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-${{ matrix.function }}"
-          echo "Deploying to: $FUNCTION_NAME"
+          FUNC="${{ matrix.function }}"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${FUNC}"
+          echo "Deploying to Lambda: $FUNCTION_NAME"
 
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
-            --zip-file "fileb://${{ matrix.function }}.zip" \
+            --zip-file "fileb://${FUNC}.zip" \
             --no-cli-pager
 
-          # Wait for the update to be active before finishing
           aws lambda wait function-updated \
             --function-name "$FUNCTION_NAME"
 
-          echo "Deploy complete for $FUNCTION_NAME"
+          echo "Deploy complete: $FUNCTION_NAME"
 
       - name: Verify deployment
         run: |
-          FUNCTION_NAME="${{ secrets.PROJECT_NAME || 'attest' }}-${{ matrix.function }}"
+          FUNCTION_NAME="${{ secrets.PROJECT_NAME }}-${{ matrix.function }}"
           aws lambda get-function \
             --function-name "$FUNCTION_NAME" \
             --query 'Configuration.{State:State,LastModified:LastModified,CodeSize:CodeSize}' \
