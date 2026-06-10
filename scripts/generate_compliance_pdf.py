@@ -229,7 +229,6 @@ def main():
     summary_path = Path(args.summary)
     if not summary_path.exists():
         print(f"Warning: {summary_path} not found. Generating failure fallback PDF.")
-        import datetime
         data = {
             "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "overall_status": "CRITICAL (COLLECTION FAILED)",

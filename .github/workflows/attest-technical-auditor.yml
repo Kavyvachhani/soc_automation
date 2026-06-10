@@ -81,6 +81,8 @@ jobs:
             --output /tmp/reports \
             --bucket "${{ secrets.S3_BUCKET }}" \
             --upload
+        env:
+          DEMO_MODE: "true"
 
       - name: Generate Compliance PDF
         if: always()

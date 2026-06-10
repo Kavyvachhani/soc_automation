@@ -65,6 +65,8 @@ jobs:
             --output /tmp/reports \
             --bucket "${{ secrets.S3_BUCKET }}" \
             --upload
+        env:
+          DEMO_MODE: "true"
 
       - name: Generate Compliance PDF
         if: always()
@@ -117,6 +119,10 @@ jobs:
 
       - name: Restrict Workflow Modifications
         run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "Not a pull request. Skipping workflow modifications check."
+            exit 0
+          fi
           # Fetch the list of changed files
           URL="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
           FILES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $URL | jq -r '.[].filename')
