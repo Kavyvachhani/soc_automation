@@ -63,10 +63,12 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
     
     is_demo_mode = os.environ.get("DEMO_MODE", "false").lower() == "true"
     
-    # Check if we have evidence from all sources
+    # In modular mode (split pipelines), we don't strictly fail on missing sources.
+    # We just flag them as missing in the report.
     if not aws_ev or not github_ev or not zoho_ev or not ai_ev:
-        report["overall_status"] = "FAIL"
-        report["failed_controls"].append("Missing Evidence Sources")
+        if not is_demo_mode:
+            report["warn_count"] += 1
+            report["failed_controls"].append("Some Evidence Sources are missing or disabled in this pipeline run")
     
     # Process all results
     all_results = []
@@ -107,11 +109,13 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
         report["compliance_score_percent"] = round(score, 1)
         
     # Hardcoded rules that fail the workflow if completely missing
-    required_ids = {"CC6.1", "CC6.2", "P6.1"}
-    found_ids = {r.get("control_id") for r in all_results}
-    missing_required = required_ids - found_ids
+    # But only check them if their respective source was actually collected!
+    missing_required = set()
+    if aws_ev and "CC6.1" not in found_ids: missing_required.add("CC6.1")
+    if aws_ev and "CC6.2" not in found_ids: missing_required.add("CC6.2")
+    if zoho_ev and "P6.1" not in found_ids: missing_required.add("P6.1")
     
-    if missing_required:
+    if missing_required and not is_demo_mode:
         report["overall_status"] = "FAIL"
         report["failed_controls"].append(f"Missing required controls: {', '.join(missing_required)}")
 

@@ -259,7 +259,6 @@ def main():
     if args.upload and args.bucket:
         import boto3
         s3 = boto3.client("s3")
-        import datetime
         date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         key = f"attest-compliance-auditor/{date_str}/reports/{Path(args.output).name}"
         s3.upload_file(args.output, args.bucket, key,
