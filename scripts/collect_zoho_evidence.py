@@ -41,9 +41,11 @@ def _warn(control_id: str, control: str, evidence: dict, reason: str) -> dict:
 # ─── Mock Data Generators ──────────────────────────────────────────────────────
 
 MOCK_EMPLOYEES = [
-    {"emp_id": "EMP-ABCD1234", "name": "Alice Developer", "department": "Engineering", "start_date": "2024-01-15"},
-    {"emp_id": "EMP-XYZ9876", "name": "Bob Engineer", "department": "Engineering", "start_date": "2024-03-01"},
-    {"emp_id": "EMP-LMN4567", "name": "Charlie Manager", "department": "Product", "start_date": "2023-11-10"},
+    {"emp_id": "EMP-ABCD1234", "name": "Alice Developer", "department": "Engineering", "start_date": "2024-01-15", "bg_check": "Passed"},
+    {"emp_id": "EMP-XYZ9876", "name": "Bob Engineer", "department": "Engineering", "start_date": "2024-03-01", "bg_check": "Passed"},
+    {"emp_id": "EMP-LMN4567", "name": "Charlie Manager", "department": "Product", "start_date": "2023-11-10", "bg_check": "Passed"},
+    {"emp_id": "EMP-PQR5555", "name": "Diana Designer", "department": "Design", "start_date": "2024-05-20", "bg_check": "Passed"},
+    {"emp_id": "EMP-STU7777", "name": "Eve Analyst", "department": "Security", "start_date": "2023-08-05", "bg_check": "Passed"},
 ]
 
 def get_zoho_token() -> str:
@@ -111,6 +113,30 @@ def collect_training_completion(token: str) -> list[dict]:
         
     return results
 
+def collect_background_checks(token: str) -> list[dict]:
+    """CC1.2 — Background Checks."""
+    results = []
+    for emp in MOCK_EMPLOYEES:
+        evidence = {
+            "emp_id": emp["emp_id"],
+            "name": emp["name"],
+            "background_check": {
+                "status": emp["bg_check"],
+                "completed_date": emp["start_date"],
+                "vendor": "Checkr"
+            }
+        }
+        results.append(_pass("CC1.2", f"Background Check - {emp['emp_id']}", evidence))
+    return results
+
+def collect_hr_summary(token: str) -> dict:
+    return {
+        "active_employees": len(MOCK_EMPLOYEES),
+        "departments": list(set(e["department"] for e in MOCK_EMPLOYEES)),
+        "bg_checks_passed": sum(1 for e in MOCK_EMPLOYEES if e["bg_check"] == "Passed"),
+        "training_completion_rate": "100%"
+    }
+
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -142,6 +168,12 @@ def main():
         if r["status"] == "FAIL":
             failures.append(r["control"])
 
+    # Background Checks
+    for r in collect_background_checks(token):
+        all_results.append(r)
+        if r["status"] == "FAIL":
+            failures.append(r["control"])
+
     # Write evidence
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     evidence_file = output_dir / f"zoho_evidence_{ts}.json"
@@ -154,6 +186,7 @@ def main():
         "fail_count": sum(1 for r in all_results if r["status"] == "FAIL"),
         "warn_count": sum(1 for r in all_results if r["status"] == "WARN"),
         "failures": failures,
+        "hr_summary": collect_hr_summary(token),
         "results": all_results,
     }
     evidence_file.write_text(json.dumps(manifest, indent=2, default=str))

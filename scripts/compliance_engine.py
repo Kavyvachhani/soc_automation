@@ -58,7 +58,9 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
             "zoho": "collected" if zoho_ev else "missing",
             "ai_pentest": "collected" if ai_ev else "missing"
         },
-        "controls_matrix": []
+        "controls_matrix": [],
+        "infrastructure_summary": {},
+        "hr_summary": {}
     }
     
     is_demo_mode = os.environ.get("DEMO_MODE", "false").lower() == "true"
@@ -76,6 +78,11 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
     if github_ev and "results" in github_ev: all_results.extend(github_ev["results"])
     if zoho_ev and "results" in zoho_ev: all_results.extend(zoho_ev["results"])
     if ai_ev and "results" in ai_ev: all_results.extend(ai_ev["results"])
+    
+    if aws_ev and "infrastructure_summary" in aws_ev:
+        report["infrastructure_summary"] = aws_ev["infrastructure_summary"]
+    if zoho_ev and "hr_summary" in zoho_ev:
+        report["hr_summary"] = zoho_ev["hr_summary"]
     
     report["total_controls_checked"] = len(all_results)
     

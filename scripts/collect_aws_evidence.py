@@ -282,6 +282,45 @@ def collect_cloudwatch_alarms(session) -> dict:
         return _warn("CC7.2", "CloudWatch Alarms", {"error": str(e)}, str(e))
 
 
+def collect_infrastructure_summary(session) -> dict:
+    """Collect footprint metrics: VPCs, EC2s, RDS, IAM Users."""
+    summary = {"vpcs": 0, "subnets": 0, "ec2_instances": 0, "rds_instances": 0, "iam_users": 0}
+    try:
+        ec2 = session.client("ec2")
+        summary["vpcs"] = len(ec2.describe_vpcs().get("Vpcs", []))
+        summary["subnets"] = len(ec2.describe_subnets().get("Subnets", []))
+        paginator = ec2.get_paginator("describe_instances")
+        count = 0
+        for page in paginator.paginate():
+            for r in page.get("Reservations", []):
+                count += len(r.get("Instances", []))
+        summary["ec2_instances"] = count
+    except Exception:
+        pass
+        
+    try:
+        rds = session.client("rds")
+        paginator = rds.get_paginator("describe_db_instances")
+        count = 0
+        for page in paginator.paginate():
+            count += len(page.get("DBInstances", []))
+        summary["rds_instances"] = count
+    except Exception:
+        pass
+        
+    try:
+        iam = session.client("iam")
+        paginator = iam.get_paginator("list_users")
+        count = 0
+        for page in paginator.paginate():
+            count += len(page.get("Users", []))
+        summary["iam_users"] = count
+    except Exception:
+        pass
+        
+    return summary
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -348,6 +387,7 @@ def main():
         "fail_count": sum(1 for r in all_results if r["status"] == "FAIL"),
         "warn_count": sum(1 for r in all_results if r["status"] == "WARN"),
         "failures": failures,
+        "infrastructure_summary": collect_infrastructure_summary(session),
         "results": all_results,
     }
     evidence_file.write_text(json.dumps(manifest, indent=2, default=str))
