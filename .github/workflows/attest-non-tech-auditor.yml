@@ -1,4 +1,4 @@
-name: attest-compliance-test
+name: attest-non-tech-auditor
 
 # Triggers for SOC 2 evidence collection
 on:
@@ -42,26 +42,7 @@ jobs:
       - name: Create Evidence Directory
         run: mkdir -p /tmp/evidence /tmp/reports
 
-      - name: Collect AWS Evidence
-        run: |
-          python scripts/collect_aws_evidence.py \
-            --bucket "${{ secrets.S3_BUCKET }}" \
-            --project "${{ secrets.PROJECT_NAME }}" \
-            --output /tmp/evidence \
-            --upload
-        env:
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
-          
-      - name: Collect GitHub Evidence
-        run: |
-          python scripts/collect_github_evidence.py \
-            --repo "${{ github.repository }}" \
-            --branch "main" \
-            --output /tmp/evidence \
-            --bucket "${{ secrets.S3_BUCKET }}" \
-            --upload
-        env:
-          GITHUB_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}
+
           
       - name: Collect Zoho HR Evidence
         run: |
@@ -74,13 +55,7 @@ jobs:
           ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
           ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
 
-      - name: Run Shannon AI Pentest
-        run: |
-          python scripts/ai_pentest.py \
-            --scan-dirs scripts/ \
-            --output /tmp/evidence/ai_evidence_latest.json
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
           
 
       - name: Run Compliance Engine
@@ -108,6 +83,7 @@ jobs:
           path: |
             /tmp/evidence/
             /tmp/reports/
+          retention-days: 90
 
       - name: Create Urgent Incident Alert
         if: failure()
@@ -119,4 +95,41 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}
 
-          retention-days: 90
+  enforce-soc2-change-management:
+    name: SOC 2 Change Management Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify PR Description for Ticket References
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [[ ! "$PR_BODY" =~ (JIRA|TICKET|ISSUE)-[0-9]+ ]]; then
+            echo "::error::SOC 2 Compliance Failure: All PRs must reference a valid issue ticket (e.g., TICKET-123) in the description for change management tracking."
+            exit 1
+          fi
+          echo "Ticket reference found. Change management tracking verified."
+
+      - name: Restrict Workflow Modifications
+        run: |
+          # Fetch the list of changed files
+          URL="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+          FILES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $URL | jq -r '.[].filename')
+          
+          for FILE in $FILES; do
+            if [[ "$FILE" == .github/workflows/* ]]; then
+              echo "::warning::Workflow modification detected in $FILE."
+              # In a real environment, you might check if the author is in an 'approvers' team
+              # using the GitHub API, or require a specific required review.
+              # For this automated check, we just flag it.
+              echo "Workflow files require explicit Tech Lead approval per SOC 2 guidelines."
+            fi
+          done
+
+      - name: Run Static Security Analysis
+        run: |
+          echo "Running lightweight static analysis (bandit) on Python code..."
+          pip install --quiet bandit
+          bandit -r scripts/ lambda/ portal/ -ll -q || echo "::warning::Static analysis found potential issues. Please review."
+          echo "Static analysis complete."

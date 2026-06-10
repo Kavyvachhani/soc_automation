@@ -110,6 +110,7 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
         
     # Hardcoded rules that fail the workflow if completely missing
     # But only check them if their respective source was actually collected!
+    found_ids = {r.get("control_id") for r in all_results}
     missing_required = set()
     if aws_ev and "CC6.1" not in found_ids: missing_required.add("CC6.1")
     if aws_ev and "CC6.2" not in found_ids: missing_required.add("CC6.2")
