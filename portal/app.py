@@ -184,63 +184,91 @@ def load_policy_text(policy: dict, nda_text: str | None = None) -> str:
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Outfit', sans-serif !important; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
-[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #0b0f19 !important; }
+[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #000000 !important; color: #ededed !important; }
 
-/* Stunning background glow */
-[data-testid="stAppViewContainer"] {
-    background-image: 
-        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.1), transparent 25%) !important;
+/* Animated Mesh Gradient Background */
+[data-testid="stAppViewContainer"]::before {
+    content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: 
+        radial-gradient(circle at 15% 50%, rgba(120, 119, 198, 0.15), transparent 30%),
+        radial-gradient(circle at 85% 30%, rgba(255, 100, 150, 0.1), transparent 30%),
+        radial-gradient(circle at 50% 80%, rgba(100, 200, 255, 0.1), transparent 30%);
+    z-index: -1; animation: bgPulse 15s ease-in-out infinite alternate;
+}
+@keyframes bgPulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
 }
 
-.block-container { padding-top: 3rem !important; padding-bottom: 4rem !important; max-width: 960px !important; }
+.block-container { padding-top: 3rem !important; padding-bottom: 4rem !important; max-width: 1050px !important; }
 
 /* Glass Sidebar */
 [data-testid="stSidebar"] {
-    background: rgba(11, 15, 25, 0.6) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border-right: 1px solid rgba(255,255,255,0.05) !important;
+    background: rgba(10, 10, 10, 0.6) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border-right: 1px solid rgba(255,255,255,0.08) !important;
 }
 [data-testid="stSidebar"] * { color: #d1d5db !important; }
 
-h1, h2, h3, h4 { color: #f3f4f6 !important; font-weight: 700 !important; letter-spacing: -0.03em !important; }
-p, .stMarkdown p { color: #9ca3af !important; line-height: 1.7 !important; }
+h1, h2, h3, h4 { color: #ffffff !important; font-weight: 700 !important; letter-spacing: -0.04em !important; }
+h1 { font-size: 2.5rem !important; background: linear-gradient(to right, #fff, #a1a1aa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+p, .stMarkdown p { color: #a1a1aa !important; line-height: 1.6 !important; font-size: 0.95rem !important; }
 
 /* Step header */
-.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #ec4899); font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 0 25px rgba(99, 102, 241, 0.4); }
-.step-title { color: #f3f4f6 !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
-.step-sub { color: #9ca3af; font-size: 0.9rem; margin-top: 4px; }
+.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(180deg, #6366f1, #4f46e5); font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4); }
+.step-title { color: #ffffff !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
+.step-sub { color: #a1a1aa; font-size: 0.9rem; margin-top: 4px; }
 
 /* Sidebar steps */
-.sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; margin-bottom: 4px; font-size: 0.9rem; transition: all 0.3s ease; }
+.sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; margin-bottom: 4px; font-size: 0.9rem; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .sb-step-done { color: #34d399 !important; }
-.sb-step-active { background: rgba(99, 102, 241, 0.15); color: #818cf8 !important; font-weight: 600; border-left: 4px solid #818cf8; transform: translateX(4px); }
+.sb-step-active { background: rgba(255, 255, 255, 0.05); color: #ffffff !important; font-weight: 600; border-left: 4px solid #fff; transform: translateX(4px); }
 .sb-step-todo { color: #4b5563 !important; }
 
-/* Glass Containers & Metrics */
+/* Extreme Glass Containers */
 [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
-    background: rgba(17, 24, 39, 0.7) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
+    background: rgba(10, 10, 10, 0.6) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 16px !important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    box-shadow: 0 4px 24px -1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease !important;
 }
-[data-testid="stVerticalBlockBorderWrapper"]:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.4) !important; }
+[data-testid="stVerticalBlockBorderWrapper"]:hover { 
+    transform: translateY(-2px) !important; 
+    border-color: rgba(255,255,255,0.15) !important;
+}
 
-/* Buttons */
+/* Primary Button */
 .stButton>button {
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
-    color: #ffffff !important; border: none !important; border-radius: 12px !important;
-    font-weight: 600 !important; font-size: 0.95rem !important; padding: 12px 24px !important;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4) !important; transition: all 0.2s ease !important;
+    background: linear-gradient(180deg, #1e1e1e 0%, #000000 100%) !important;
+    color: #ededed !important; border: 1px solid rgba(255,255,255,0.15) !important; 
+    border-radius: 9999px !important; font-weight: 500 !important; font-size: 0.9rem !important; 
+    padding: 10px 24px !important; box-shadow: 0 2px 8px rgba(0,0,0,0.8) !important; 
+    transition: all 0.2s ease !important;
 }
-.stButton>button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(168, 85, 247, 0.5) !important; filter: brightness(1.1); }
+.stButton>button:hover { 
+    background: linear-gradient(180deg, #2a2a2a 0%, #0a0a0a 100%) !important;
+    border-color: rgba(255,255,255,0.3) !important; 
+    color: #fff !important; transform: scale(1.02) !important; 
+}
+
+/* Accent Button for Approve */
+.stButton>button[kind="primary"] {
+    background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%) !important;
+    border: 1px solid #818cf8 !important; color: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important;
+}
+.stButton>button[kind="primary"]:hover {
+    background: linear-gradient(180deg, #818cf8 0%, #6366f1 100%) !important;
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6) !important;
+}
 
 /* Download Buttons */
 [data-testid="stDownloadButton"]>button {
@@ -252,10 +280,10 @@ p, .stMarkdown p { color: #9ca3af !important; line-height: 1.7 !important; }
 
 /* Form inputs */
 [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
-    background: rgba(17, 24, 39, 0.8) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; color: #f3f4f6 !important;
+    background: rgba(20, 20, 20, 0.8) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; color: #f3f4f6 !important; transition: all 0.2s;
 }
 [data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
-    border-color: #818cf8 !important; box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2) !important;
+    border-color: #ffffff !important; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1) !important;
 }
 </style>
 """

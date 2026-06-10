@@ -37,58 +37,79 @@ st.set_page_config(
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Outfit', sans-serif !important; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
-[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #0b0f19 !important; }
+[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #000000 !important; color: #ededed !important; }
 
-/* Stunning background glow */
-[data-testid="stAppViewContainer"] {
-    background-image: 
-        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.1), transparent 25%) !important;
+/* Animated Mesh Gradient Background */
+[data-testid="stAppViewContainer"]::before {
+    content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: 
+        radial-gradient(circle at 15% 50%, rgba(120, 119, 198, 0.15), transparent 30%),
+        radial-gradient(circle at 85% 30%, rgba(255, 100, 150, 0.1), transparent 30%),
+        radial-gradient(circle at 50% 80%, rgba(100, 200, 255, 0.1), transparent 30%);
+    z-index: -1; animation: bgPulse 15s ease-in-out infinite alternate;
+}
+@keyframes bgPulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
 }
 
-.block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1000px !important; }
+.block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1050px !important; }
 
-h1, h2, h3, h4 { color: #f3f4f6 !important; font-weight: 700 !important; letter-spacing: -0.03em !important; }
-p, .stMarkdown p { color: #9ca3af !important; line-height: 1.7 !important; }
+h1, h2, h3, h4 { color: #ffffff !important; font-weight: 700 !important; letter-spacing: -0.04em !important; }
+h1 { font-size: 2.5rem !important; background: linear-gradient(to right, #fff, #a1a1aa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+p, .stMarkdown p { color: #a1a1aa !important; line-height: 1.6 !important; font-size: 0.95rem !important; }
 
-/* Glass Containers & Metrics */
+/* Extreme Glass Containers */
 [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
-    background: rgba(17, 24, 39, 0.7) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
+    background: rgba(10, 10, 10, 0.6) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 16px !important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    box-shadow: 0 4px 24px -1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease !important;
 }
-[data-testid="stVerticalBlockBorderWrapper"]:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.4) !important; }
+[data-testid="stVerticalBlockBorderWrapper"]:hover { 
+    transform: translateY(-2px) !important; 
+    border-color: rgba(255,255,255,0.15) !important;
+}
 
-/* Buttons */
+/* Primary Button */
 .stButton>button {
-    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
-    color: #ffffff !important; border: none !important; border-radius: 12px !important;
-    font-weight: 600 !important; font-size: 0.95rem !important; padding: 12px 24px !important;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4) !important; transition: all 0.2s ease !important;
+    background: linear-gradient(180deg, #1e1e1e 0%, #000000 100%) !important;
+    color: #ededed !important; border: 1px solid rgba(255,255,255,0.15) !important; 
+    border-radius: 9999px !important; font-weight: 500 !important; font-size: 0.9rem !important; 
+    padding: 10px 24px !important; box-shadow: 0 2px 8px rgba(0,0,0,0.8) !important; 
+    transition: all 0.2s ease !important;
 }
-.stButton>button:hover { transform: translateY(-2px) !important; box-shadow: 0 8px 25px rgba(168, 85, 247, 0.5) !important; filter: brightness(1.1); }
+.stButton>button:hover { 
+    background: linear-gradient(180deg, #2a2a2a 0%, #0a0a0a 100%) !important;
+    border-color: rgba(255,255,255,0.3) !important; 
+    color: #fff !important; transform: scale(1.02) !important; 
+}
+
+/* Accent Button for Approve */
+.stButton>button[kind="primary"] {
+    background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%) !important;
+    border: 1px solid #818cf8 !important; color: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important;
+}
+.stButton>button[kind="primary"]:hover {
+    background: linear-gradient(180deg, #818cf8 0%, #6366f1 100%) !important;
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6) !important;
+}
 
 /* Reject Button Variant */
 .reject-btn button {
-    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important;
-    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
+    background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%) !important;
+    border: 1px solid #f87171 !important; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4) !important;
 }
+.reject-btn button:hover { background: linear-gradient(180deg, #f87171 0%, #ef4444 100%) !important; }
 
-/* Download Buttons */
-[data-testid="stDownloadButton"]>button {
-    background: rgba(31, 41, 55, 0.8) !important;
-    border: 1px solid rgba(139, 92, 246, 0.4) !important;
-    color: #c4b5fd !important; box-shadow: none !important; border-radius: 10px !important;
-}
-[data-testid="stDownloadButton"]>button:hover { background: rgba(139, 92, 246, 0.15) !important; border-color: rgba(139, 92, 246, 0.8) !important; transform: translateY(-1px) !important; color: #ddd6fe !important; }
-
-hr { border-color: rgba(255,255,255,0.07) !important; margin: 1.5rem 0 !important; }
+hr { border-color: rgba(255,255,255,0.08) !important; margin: 2rem 0 !important; }
 </style>
 """
 

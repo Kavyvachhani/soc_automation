@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           BUILD_DIR="build/portal_api"
           mkdir -p "$BUILD_DIR"
-          pip install --quiet boto3 -t "$BUILD_DIR/"
+          pip install --quiet -r lambda/requirements.txt -t "$BUILD_DIR/"
           cp lambda/portal_api.py "$BUILD_DIR/"
           cd "$BUILD_DIR"
           zip -r "../../portal_api.zip" . -x "*.pyc" -x "__pycache__/*"
