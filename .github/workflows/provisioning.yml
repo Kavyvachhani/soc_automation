@@ -79,11 +79,12 @@ jobs:
           )
           print('Created pending-approval.json')
           PYEOF
+          fi
 
-            # Seed a synthetic employee.json if it does not already exist
-            aws s3api head-object --bucket "$BUCKET" --key "employees/${EMP_ID}/employee.json" \
-              --no-cli-pager 2>/dev/null \
-            || python3 << PYEOF
+          # Seed a synthetic employee.json if it does not already exist
+          aws s3api head-object --bucket "$BUCKET" --key "employees/${EMP_ID}/employee.json" \
+            --no-cli-pager 2>/dev/null \
+          || python3 << PYEOF
           import json, boto3, datetime
           s3 = boto3.client('s3', region_name='${{ secrets.AWS_REGION }}')
           emp = {
@@ -106,7 +107,6 @@ jobs:
           )
           print('Seeded synthetic employee.json')
           PYEOF
-          fi
 
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "Token ready: ${TOKEN:0:8}..."

@@ -1393,12 +1393,7 @@ def step_approve() -> None:
             else:
                 st.warning(f"Status: **{status}** — waiting for tech lead to click the approval link in their email.")
                 token = pending.get("token")
-                if token:
-                    api_url = get_approval_api_url()
-                    if api_url:
-                        approve_url = f"{api_url}/approve?token={token}&emp_id={emp_id}&action=approve&approver=portal-debug"
-                        st.info("💡 **Debug / Shortcut Link:** You can simulate the Tech Lead's approval by clicking the button below:")
-                        st.link_button("✅ Approve & Provision Access", approve_url)
+                st.info("💡 **Manager Approval Required:** Please use the separate Manager Portal (Port 8002) to review and approve this request.")
         except Exception as exc:
             st.warning(f"Approval request is being processed. Refresh to check status. Details: {exc}")
 
