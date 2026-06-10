@@ -184,106 +184,120 @@ def load_policy_text(policy: dict, nda_text: str | None = None) -> str:
 
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important; }
 #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none !important; }
-[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { background-color: #000000 !important; color: #ededed !important; }
 
-/* Animated Mesh Gradient Background */
+/* Clean, bright background */
+[data-testid="stAppViewContainer"], [data-testid="stMain"], .main .block-container { 
+    background-color: #f9fafb !important; 
+    color: #111827 !important; 
+}
+
+/* Subtle dot pattern for texture */
 [data-testid="stAppViewContainer"]::before {
     content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    background: 
-        radial-gradient(circle at 15% 50%, rgba(120, 119, 198, 0.15), transparent 30%),
-        radial-gradient(circle at 85% 30%, rgba(255, 100, 150, 0.1), transparent 30%),
-        radial-gradient(circle at 50% 80%, rgba(100, 200, 255, 0.1), transparent 30%);
-    z-index: -1; animation: bgPulse 15s ease-in-out infinite alternate;
-}
-@keyframes bgPulse {
-    0% { transform: scale(1); opacity: 0.8; }
-    100% { transform: scale(1.1); opacity: 1; }
+    background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+    background-size: 24px 24px;
+    z-index: -1; opacity: 0.6;
 }
 
-.block-container { padding-top: 3rem !important; padding-bottom: 4rem !important; max-width: 1050px !important; }
+.block-container { padding-top: 3rem !important; padding-bottom: 5rem !important; max-width: 1100px !important; }
 
-/* Glass Sidebar */
+/* Clean Sidebar */
 [data-testid="stSidebar"] {
-    background: rgba(10, 10, 10, 0.6) !important;
-    backdrop-filter: blur(24px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
-    border-right: 1px solid rgba(255,255,255,0.08) !important;
+    background: #ffffff !important;
+    border-right: 1px solid #e5e7eb !important;
 }
-[data-testid="stSidebar"] * { color: #d1d5db !important; }
+[data-testid="stSidebar"] * { color: #374151 !important; }
 
-h1, h2, h3, h4 { color: #ffffff !important; font-weight: 700 !important; letter-spacing: -0.04em !important; }
-h1 { font-size: 2.5rem !important; background: linear-gradient(to right, #fff, #a1a1aa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-p, .stMarkdown p { color: #a1a1aa !important; line-height: 1.6 !important; font-size: 0.95rem !important; }
+/* Typography */
+h1, h2, h3, h4 { color: #111827 !important; font-weight: 700 !important; letter-spacing: -0.02em !important; }
+h1 { font-size: 2.2rem !important; margin-bottom: 0.5rem !important; }
+p, .stMarkdown p { color: #4b5563 !important; line-height: 1.6 !important; font-size: 1rem !important; }
+strong { color: #111827 !important; font-weight: 600 !important; }
 
 /* Step header */
-.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(180deg, #6366f1, #4f46e5); font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4); }
-.step-title { color: #ffffff !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
-.step-sub { color: #a1a1aa; font-size: 0.9rem; margin-top: 4px; }
+.step-header { display: flex; align-items: center; gap: 16px; margin-bottom: 1.8rem; padding-bottom: 1.2rem; border-bottom: 1px solid #e5e7eb; }
+.step-num { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: #4f46e5; font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2); }
+.step-title { color: #111827 !important; font-size: 1.6rem; font-weight: 700; margin: 0; }
+.step-sub { color: #6b7280; font-size: 0.95rem; margin-top: 4px; }
 
 /* Sidebar steps */
-.sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; margin-bottom: 4px; font-size: 0.9rem; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-.sb-step-done { color: #34d399 !important; }
-.sb-step-active { background: rgba(255, 255, 255, 0.05); color: #ffffff !important; font-weight: 600; border-left: 4px solid #fff; transform: translateX(4px); }
-.sb-step-todo { color: #4b5563 !important; }
+.sb-step { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.95rem; transition: all 0.2s ease; }
+.sb-step-done { color: #059669 !important; font-weight: 500; }
+.sb-step-active { background: #f3f4f6; color: #111827 !important; font-weight: 600; border-left: 4px solid #4f46e5; transform: translateX(4px); }
+.sb-step-todo { color: #9ca3af !important; }
 
-/* Extreme Glass Containers */
+/* Premium Cards (Metrics, Expanders, Block Wrappers) */
 [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stMetric"], [data-testid="stExpander"] {
-    background: rgba(10, 10, 10, 0.6) !important;
-    backdrop-filter: blur(24px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 16px !important;
-    box-shadow: 0 4px 24px -1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease !important;
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover { 
     transform: translateY(-2px) !important; 
-    border-color: rgba(255,255,255,0.15) !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04) !important;
+    border-color: #d1d5db !important;
 }
 
-/* Primary Button */
+/* Primary Action Buttons */
 .stButton>button {
-    background: linear-gradient(180deg, #1e1e1e 0%, #000000 100%) !important;
-    color: #ededed !important; border: 1px solid rgba(255,255,255,0.15) !important; 
-    border-radius: 9999px !important; font-weight: 500 !important; font-size: 0.9rem !important; 
-    padding: 10px 24px !important; box-shadow: 0 2px 8px rgba(0,0,0,0.8) !important; 
+    background: #000000 !important;
+    color: #ffffff !important; 
+    border: 1px solid transparent !important; 
+    border-radius: 8px !important; 
+    font-weight: 500 !important; 
+    font-size: 0.95rem !important; 
+    padding: 0.5rem 1.2rem !important; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important; 
     transition: all 0.2s ease !important;
 }
 .stButton>button:hover { 
-    background: linear-gradient(180deg, #2a2a2a 0%, #0a0a0a 100%) !important;
-    border-color: rgba(255,255,255,0.3) !important; 
-    color: #fff !important; transform: scale(1.02) !important; 
+    background: #1f2937 !important;
+    transform: translateY(-1px) !important; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important; 
 }
 
-/* Accent Button for Approve */
+/* Approve Button (Accent) */
 .stButton>button[kind="primary"] {
-    background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%) !important;
-    border: 1px solid #818cf8 !important; color: #ffffff !important;
-    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4) !important;
+    background: #4f46e5 !important;
+    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2) !important;
 }
 .stButton>button[kind="primary"]:hover {
-    background: linear-gradient(180deg, #818cf8 0%, #6366f1 100%) !important;
-    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.6) !important;
+    background: #4338ca !important;
+    box-shadow: 0 4px 6px rgba(79, 70, 229, 0.3) !important;
 }
 
 /* Download Buttons */
 [data-testid="stDownloadButton"]>button {
-    background: rgba(31, 41, 55, 0.8) !important;
-    border: 1px solid rgba(139, 92, 246, 0.4) !important;
-    color: #c4b5fd !important; box-shadow: none !important; border-radius: 10px !important;
+    background: #ffffff !important;
+    border: 1px solid #d1d5db !important;
+    color: #374151 !important; 
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; 
+    border-radius: 8px !important;
 }
-[data-testid="stDownloadButton"]>button:hover { background: rgba(139, 92, 246, 0.15) !important; border-color: rgba(139, 92, 246, 0.8) !important; transform: translateY(-1px) !important; color: #ddd6fe !important; }
+[data-testid="stDownloadButton"]>button:hover { 
+    background: #f9fafb !important; 
+    border-color: #9ca3af !important; 
+    transform: translateY(-1px) !important; 
+    color: #111827 !important; 
+}
 
 /* Form inputs */
 [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
-    background: rgba(20, 20, 20, 0.8) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 10px !important; color: #f3f4f6 !important; transition: all 0.2s;
+    background: #ffffff !important; 
+    border: 1px solid #d1d5db !important; 
+    border-radius: 8px !important; 
+    color: #111827 !important; 
+    transition: all 0.2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05) inset !important;
 }
 [data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
-    border-color: #ffffff !important; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1) !important;
+    border-color: #4f46e5 !important; 
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2) !important;
 }
 </style>
 """
