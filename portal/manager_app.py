@@ -8,10 +8,10 @@ Run:
   streamlit run portal/manager_app.py --server.port 8502
 """
 
-import datetime
 import json
 import os
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 import streamlit as st
@@ -22,7 +22,6 @@ try:
 except ImportError:
     pass
 
-BUCKET_NAME:    str = os.getenv("S3_BUCKET", "attest-vault-669167971016")
 PORTAL_API_URL: str = os.getenv("PORTAL_API_URL", "").rstrip("/")
 
 st.set_page_config(
@@ -83,79 +82,20 @@ hr { border-color: rgba(255,255,255,0.07) !important; }
 
 st.markdown(_CSS, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# AWS helpers
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _s3():
-    import boto3
-    return boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-
-
-def _check_creds() -> bool:
-    try:
-        import boto3
-        creds = boto3.Session().get_credentials()
-        if creds is None:
-            return False
-        creds.get_frozen_credentials()
-        return True
-    except Exception:
-        return False
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Data access
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_pending_requests() -> list[dict]:
-    # Prefer portal API (no local creds)
-    if PORTAL_API_URL:
-        try:
-            r = _portal_api("GET", "/portal/pending")
-            return r.get("requests", [])
-        except Exception as e:
-            st.warning(f"Portal API unavailable, trying direct S3: {e}")
-
-    from botocore.exceptions import NoCredentialsError, ClientError
+    if not PORTAL_API_URL:
+        st.error("PORTAL_API_URL not set — add it to .env and restart.")
+        return []
     try:
-        s3   = _s3()
-        resp = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix="employees/")
-        if "Contents" not in resp:
-            return []
-        out = []
-        for obj in resp["Contents"]:
-            key = obj["Key"]
-            if not (key.endswith("pending-approval.json") or key.endswith("pending-offboard.json")):
-                continue
-            try:
-                data = json.loads(s3.get_object(Bucket=BUCKET_NAME, Key=key)["Body"].read())
-                if data.get("status") != "pending":
-                    continue
-                req_type = "onboarding" if "approval" in key else "offboarding"
-                emp_id   = key.split("/")[1]
-                out.append({
-                    "type":   req_type,
-                    "emp_id": emp_id,
-                    "data":   data,
-                    "date":   data.get("created_at") or data.get("requested_at") or datetime.datetime.now().isoformat(),
-                })
-            except Exception as e:
-                print(f"[manager] skip {key}: {e}")
-        out.sort(key=lambda x: x["date"], reverse=True)
-        return out
-    except NoCredentialsError:
-        st.warning(
-            "**AWS credentials not configured.**  \n"
-            "Add your keys to a `.env` file in the project root and restart.  \n"
-            "`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`"
-        )
-        return []
-    except ClientError as e:
-        st.error(f"AWS error: {e.response['Error']['Message']}")
-        return []
+        r = _portal_api("GET", "/portal/pending")
+        return r.get("requests", [])
     except Exception as e:
-        st.error(f"S3 connection failed: {e}")
+        st.error(f"Portal API unavailable: {e}")
         return []
 
 
@@ -184,69 +124,28 @@ def _portal_api(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def handle_onboarding(emp_id: str, token: str, action: str) -> bool:
-    # Try portal API first (no local creds needed)
-    if PORTAL_API_URL:
-        try:
-            r = _portal_api("POST", "/portal/approve", {"emp_id": emp_id, "action": action, "approver": _manager_name(), "type": "onboarding"})
-            st.success(f"✅ Onboarding **{action}d** for `{emp_id}`.")
-            return True
-        except Exception as e:
-            st.warning(f"Portal API failed, falling back to direct S3: {e}")
-
-    api_url = os.environ.get("APPROVAL_API_URL", "").rstrip("/")
-    if api_url:
-        url = f"{api_url}/approve?token={token}&emp_id={emp_id}&action={action}&approver={_manager_name()}"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                if resp.status == 200:
-                    st.success(f"✅ Sent **{action}** to Lambda for `{emp_id}`.")
-                    return True
-        except Exception as e:
-            st.error(f"Lambda API error: {e}")
-            return False
-
-    # Fallback: write directly to S3
     try:
-        s3  = _s3()
-        key = f"employees/{emp_id}/pending-approval.json"
-        data = json.loads(s3.get_object(Bucket=BUCKET_NAME, Key=key)["Body"].read())
-        now  = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        data["status"] = "approved" if action == "approve" else "rejected"
-        if action == "approve":
-            data["approved_by"] = _manager_name(); data["approved_at"] = now
-        else:
-            data["rejected_by"] = _manager_name(); data["rejected_at"] = now
-        s3.put_object(Bucket=BUCKET_NAME, Key=key, Body=json.dumps(data, indent=2).encode(), ContentType="application/json")
+        _portal_api("POST", "/portal/approve", {
+            "emp_id": emp_id, "action": action,
+            "approver": _manager_name(), "type": "onboarding",
+        })
         st.success(f"✅ Onboarding **{action}d** for `{emp_id}`.")
         return True
     except Exception as e:
-        st.error(f"S3 error: {e}")
+        st.error(f"Approval failed: {e}")
         return False
 
 
 def handle_offboarding(emp_id: str, action: str) -> bool:
-    if PORTAL_API_URL:
-        try:
-            _portal_api("POST", "/portal/approve", {"emp_id": emp_id, "action": action, "approver": _manager_name(), "type": "offboarding"})
-            st.success(f"✅ Offboarding **{action}d** for `{emp_id}`.")
-            return True
-        except Exception as e:
-            st.warning(f"Portal API failed, falling back to direct S3: {e}")
     try:
-        s3  = _s3()
-        key = f"employees/{emp_id}/pending-offboard.json"
-        data = json.loads(s3.get_object(Bucket=BUCKET_NAME, Key=key)["Body"].read())
-        now  = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        data["status"] = "approved" if action == "approve" else "rejected"
-        if action == "approve":
-            data["approved_by"] = _manager_name(); data["approved_at"] = now
-        else:
-            data["rejected_by"] = _manager_name(); data["rejected_at"] = now
-        s3.put_object(Bucket=BUCKET_NAME, Key=key, Body=json.dumps(data, indent=2).encode(), ContentType="application/json")
+        _portal_api("POST", "/portal/approve", {
+            "emp_id": emp_id, "action": action,
+            "approver": _manager_name(), "type": "offboarding",
+        })
         st.success(f"✅ Offboarding **{action}d** for `{emp_id}`.")
         return True
     except Exception as e:
-        st.error(f"S3 error: {e}")
+        st.error(f"Approval failed: {e}")
         return False
 
 
@@ -277,13 +176,13 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-    # Credential status
-    if _check_creds():
+    # Connection status — green if PORTAL_API_URL is set, red otherwise
+    if PORTAL_API_URL:
         st.markdown(
             '<div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.22);'
             'border-radius:8px;padding:8px 12px;">'
-            '<div style="color:#4ade80;font-size:0.8rem;font-weight:600;">✓ AWS Connected</div>'
-            '<div style="color:#4a5170;font-size:0.72rem;margin-top:2px;">Bucket: attest-vault-…</div>'
+            '<div style="color:#4ade80;font-size:0.8rem;font-weight:600;">✓ API Connected</div>'
+            '<div style="color:#4a5170;font-size:0.72rem;margin-top:2px;">Portal Lambda · No local creds</div>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -291,8 +190,8 @@ with st.sidebar:
         st.markdown(
             '<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);'
             'border-radius:8px;padding:8px 12px;">'
-            '<div style="color:#f87171;font-size:0.8rem;font-weight:600;">⚠ No AWS Credentials</div>'
-            '<div style="color:#4a5170;font-size:0.72rem;margin-top:2px;">Add .env and restart</div>'
+            '<div style="color:#f87171;font-size:0.8rem;font-weight:600;">⚠ Not Configured</div>'
+            '<div style="color:#4a5170;font-size:0.72rem;margin-top:2px;">Add PORTAL_API_URL to .env</div>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -405,14 +304,15 @@ else:
             if is_onboarding and data.get("status") == "approved":
                 st.divider()
                 st.markdown('<div style="color:#8b92a8;font-size:0.8rem;margin-bottom:6px;">Evidence in vault:</div>', unsafe_allow_html=True)
-                dl_cols = st.columns(3)
-                for i, fname in enumerate(["signed-nda.pdf", "nda-audit-trail.json", "combined-evidence.pdf"]):
-                    try:
-                        obj = _s3().get_object(Bucket=BUCKET_NAME, Key=f"employees/{emp_id}/{fname}")
+                try:
+                    ev = _portal_api("GET", f"/portal/evidence?emp_id={emp_id}")
+                    urls = ev.get("download_urls", {})
+                    dl_cols = st.columns(3)
+                    for i, (fname, url) in enumerate(urls.items()):
                         with dl_cols[i % 3]:
-                            st.download_button(f"📄 {fname}", obj["Body"].read(), file_name=fname, use_container_width=True)
-                    except Exception:
-                        pass
+                            st.link_button(f"📄 {fname}", url, use_container_width=True)
+                except Exception:
+                    pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Footer
