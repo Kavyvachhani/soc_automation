@@ -24,7 +24,7 @@ import yaml
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-MOCK_MODE: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
+MOCK_MODE: bool = False
 BASE_DIR = Path(os.getenv("DATA_DIR", "./data"))
 REPO_ROOT = Path(__file__).parent.parent
 POLICIES_DIR = Path(os.getenv("POLICIES_DIR", str(REPO_ROOT / "policies")))

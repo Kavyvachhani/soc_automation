@@ -16,7 +16,7 @@ import streamlit as st
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-MOCK_MODE: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
+MOCK_MODE: bool = False
 BASE_DIR = Path(os.getenv("DATA_DIR", "./data"))
 BUCKET_NAME: str = os.getenv("S3_BUCKET", "attest-vault")
 API_URL = os.getenv("API_URL", "http://localhost:8501") # Mock API url or lambda
