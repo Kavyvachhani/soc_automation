@@ -136,10 +136,13 @@ def collect_iam_evidence(session) -> list[dict]:
     iam = session.client("iam")
     results = []
 
-    # List users
+    # List users with paginator
     try:
-        users_resp = iam.list_users()
-        users = users_resp.get("Users", [])
+        users = []
+        paginator = iam.get_paginator("list_users")
+        for page in paginator.paginate():
+            users.extend(page.get("Users", []))
+            
         privileged = []
         mfa_missing = []
 
@@ -205,7 +208,11 @@ def collect_security_groups(session) -> dict:
     ec2 = session.client("ec2")
     SENSITIVE_PORTS = {22, 3389, 3306, 5432, 6379, 27017}
     try:
-        sgs = ec2.describe_security_groups().get("SecurityGroups", [])
+        sgs = []
+        paginator = ec2.get_paginator("describe_security_groups")
+        for page in paginator.paginate():
+            sgs.extend(page.get("SecurityGroups", []))
+            
         exposed = []
         for sg in sgs:
             for perm in sg.get("IpPermissions", []):

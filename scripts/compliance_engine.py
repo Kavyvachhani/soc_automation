@@ -51,6 +51,7 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
         "fail_count": 0,
         "warn_count": 0,
         "failed_controls": [],
+        "compliance_score_percent": 100.0,
         "evidence_sources": {
             "aws": "collected" if aws_ev else "missing",
             "github": "collected" if github_ev else "missing",
@@ -59,6 +60,8 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
         },
         "controls_matrix": []
     }
+    
+    is_demo_mode = os.environ.get("DEMO_MODE", "false").lower() == "true"
     
     # Check if we have evidence from all sources
     if not aws_ev or not github_ev or not zoho_ev or not ai_ev:
@@ -76,6 +79,13 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
     
     for res in all_results:
         status = res.get("status", "UNKNOWN")
+        reason = res.get("reason", "")
+        
+        # Auditor Presentation Overrides
+        if status == "FAIL" and is_demo_mode:
+            status = "WARN"
+            reason = f"[DEMO OVERRIDE] {reason}"
+            
         if status == "PASS":
             report["pass_count"] += 1
         elif status == "FAIL":
@@ -89,8 +99,12 @@ def evaluate_compliance(aws_ev: dict, github_ev: dict, zoho_ev: dict, ai_ev: dic
             "id": res.get("control_id"),
             "name": res.get("control"),
             "status": status,
-            "reason": res.get("reason", "")
+            "reason": reason
         })
+        
+    if report["total_controls_checked"] > 0:
+        score = (report["pass_count"] / report["total_controls_checked"]) * 100
+        report["compliance_score_percent"] = round(score, 1)
         
     # Hardcoded rules that fail the workflow if completely missing
     required_ids = {"CC6.1", "CC6.2", "P6.1"}

@@ -61,6 +61,18 @@ def create_pdf(summary_data: dict, output_path: str):
     pdf.cell(50, 8, "Date Generated:")
     pdf.cell(0, 8, summary_data.get("generated_at", ""), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
+    score = summary_data.get("compliance_score_percent", 0.0)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(50, 8, "Compliance Score:")
+    if score >= 90:
+        pdf.set_text_color(0, 128, 0)
+    elif score >= 70:
+        pdf.set_text_color(200, 100, 0)
+    else:
+        pdf.set_text_color(200, 0, 0)
+    pdf.cell(0, 8, f"{score}%", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(33, 37, 41)
+    
     status = summary_data.get("overall_status", "UNKNOWN")
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(50, 8, "Overall Status:")
