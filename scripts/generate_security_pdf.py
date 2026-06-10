@@ -150,7 +150,7 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
     total_critical = len(bandit_critical) + len(semgrep_critical) + len(trivy_critical) + len(ai_critical) + len(secrets_found)
     overall_status = "CRITICAL" if total_critical > 0 else ("HIGH" if (bandit_high or trivy_high or ai_high) else "PASS")
 
-    now_str   = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now_str   = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     commit    = os.getenv("COMMIT_SHA", "N/A")[:12]
     branch    = os.getenv("BRANCH", "main")
     actor     = os.getenv("ACTOR", "GitHub Actions")
@@ -319,7 +319,7 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
 
         if len(bandit_results) > 50:
             pdf.set_font("Helvetica", "I", 8)
-            pdf.cell(0, 5, f"  … and {len(bandit_results)-50} more findings. See bandit.json for full list.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 5, f"  ... and {len(bandit_results)-50} more findings. See bandit.json for full list.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── Section: Semgrep ─────────────────────────────────────────────────────
     pdf.add_page()
