@@ -708,11 +708,55 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
     # ── Section 11: Enterprise AWS Configuration Controls Audit ─────────────────────────────
     pdf.add_page()
     _section_header(pdf, "11", "Enterprise AWS Infrastructure Controls Audit")
+    
+    # Print infrastructure footprint summary
+    summary = aws_ev.get("infrastructure_summary", {})
+    if summary:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(0, 6, "  Active Infrastructure Footprint Metrics:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 8)
+        
+        items = [
+            ("Virtual Private Clouds (VPCs)", summary.get("vpcs", 0)),
+            ("VPC Subnets (Public/Private)", summary.get("subnets", 0)),
+            ("EC2 Compute Instances", summary.get("ec2_instances", 0)),
+            ("RDS Database Instances", summary.get("rds_instances", 0)),
+            ("DynamoDB Tables", summary.get("dynamodb_tables", 0)),
+            ("Customer Managed KMS Keys", summary.get("kms_keys", 0)),
+            ("Application Load Balancers (ALBs)", summary.get("load_balancers", 0)),
+            ("WAFv2 Web ACLs", summary.get("waf_acls", 0)),
+            ("ECS Fargate Clusters", summary.get("ecs_clusters", 0)),
+            ("Secrets Manager Secrets", summary.get("secrets", 0)),
+            ("AWS Backup Plans", summary.get("backup_plans", 0)),
+            ("VPC Gateway/Interface Endpoints", summary.get("vpc_endpoints", 0)),
+            ("Route53 Private DNS Zones", summary.get("route53_zones", 0)),
+            ("IAM Identity Users", summary.get("iam_users", 0)),
+        ]
+        
+        for idx, (label, val) in enumerate(items):
+            bg_color = (255, 255, 255) if (idx // 2) % 2 == 0 else (248, 250, 252)
+            pdf.set_fill_color(*bg_color)
+            
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(65, 5, f"    {label}:", fill=True)
+            pdf.set_font("Helvetica", "B", 8)
+            
+            if idx % 2 == 0:
+                pdf.cell(22, 5, str(val), fill=True)
+            else:
+                pdf.cell(0, 5, str(val), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        if len(items) % 2 != 0:
+            pdf.ln(5)
+        else:
+            pdf.ln(2)
+            
     aws_results = aws_ev.get("results", [])
     if not aws_results:
         pdf.set_font("Helvetica", "I", 9)
         pdf.cell(0, 6, "  AWS account evidence not scanned or data missing.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     else:
+        pdf.ln(2)
         _table_header(pdf, ["SOC 2 ID", "Resource / Control Target", "Status", "Auditor Observations"])
         for i, r in enumerate(aws_results[:35]):
             status = r.get("status", "UNKNOWN")
@@ -744,26 +788,113 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
     pdf.ln(2)
 
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, "2. Zoho People Onboarding Access Control Process (SOC 2 CC6.2)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, "2. Onboarding Access Control Process & Policies (SOC 2 CC6.2)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     onboarding_policy = (
-        "- HR Profile Creation: Newly hired employees are created in Zoho People on offer signature.\n"
-        "- Background Screening Check: Run automatically via background screening integrations.\n"
-        "- Policy Acknowledgement Gate: Employee signs NDAs, Acceptable Use, and Handbooks.\n"
-        "- Zoho Identity (SSO) Account: Set up with forced 14-char passwords, account lockouts, and mandatory MFA."
+        "- HR Profile Creation: Newly hired employees are created in Zoho People upon offer letter signature.\n"
+        "- Zoho Identity (SSO) Account: Managed with forced 14-char passwords, lockouts, and mandatory MFA.\n"
+        "- Access Approval Gate: Exceeding baseline access permissions requires Tech Lead secondary sign-off."
     )
     pdf.multi_cell(0, 4.5, onboarding_policy, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, "3. Zoho People Offboarding Access Revocation Process (SOC 2 CC6.3)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 6, "3. Onboarding Compliance Checklist & Controls Matrix", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    
+    # Table Header
+    pdf.set_fill_color(30, 41, 59)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.cell(10, 5.5, "ID", border=1, fill=True)
+    pdf.cell(42, 5.5, "Action Item / Control", border=1, fill=True)
+    pdf.cell(26, 5.5, "Target System", border=1, fill=True)
+    pdf.cell(18, 5.5, "SOC 2 Criteria", border=1, fill=True)
+    pdf.cell(26, 5.5, "SLA Standard", border=1, fill=True)
+    pdf.cell(34, 5.5, "Evidence Captured", border=1, fill=True)
+    pdf.cell(18, 5.5, "Status", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(33, 37, 41)
+    
+    onboarding_checklist = [
+        ("ON-01", "Signed Offer & Profile Creation", "Zoho People", "CC8.1, P6.1", "Prior to Start Date", "Offer PDF, Profile Log", "MET"),
+        ("ON-02", "Background Screening Check", "Zoho People / Checkr", "CC1.2", "Before Day 1", "Checkr Passed Status", "MET"),
+        ("ON-03", "NDA & Policy Sign-off", "Zoho People / Sign", "P6.1", "Completed on Day 1", "Signed PDF, Sign Log", "MET"),
+        ("ON-04", "Role-Based Access Approval", "Zoho People", "CC6.1, CC6.2", "Prior to Provisioning", "Manager Approval Log", "MET"),
+        ("ON-05", "SSO Account Provisioning", "Zoho Identity", "CC6.2, CC6.3", "Within 24 hours", "Creation Log Entry", "MET"),
+        ("ON-06", "Mandatory MFA Enrollment", "Zoho Identity", "CC6.3", "First login gate", "MFA Enrolled Status", "MET"),
+        ("ON-07", "Security Awareness Training", "Zoho People / LMS", "CC2.2", "Within 30 days of hire", "Training Certificate", "MET"),
+    ]
+    
+    pdf.set_font("Helvetica", "", 7)
+    for i, row in enumerate(onboarding_checklist):
+        bg = (255, 255, 255) if i % 2 == 0 else (248, 250, 252)
+        pdf.set_fill_color(*bg)
+        pdf.cell(10, 5.5, row[0], border=1, fill=True)
+        pdf.cell(42, 5.5, row[1], border=1, fill=True)
+        pdf.cell(26, 5.5, row[2], border=1, fill=True)
+        pdf.cell(18, 5.5, row[3], border=1, fill=True)
+        pdf.cell(26, 5.5, row[4], border=1, fill=True)
+        pdf.cell(34, 5.5, row[5], border=1, fill=True)
+        pdf.set_text_color(22, 163, 74)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.cell(18, 5.5, row[6], border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(33, 37, 41)
+        pdf.set_font("Helvetica", "", 7)
+
+    # Move Offboarding to its own page to ensure layout alignment
+    pdf.add_page()
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "4. Offboarding Access Revocation Process (SOC 2 CC6.1, CC6.3)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     offboarding_policy = (
-        "- Revocation SLA: Suspension of SSO and local credentials within 2 hours of emergency termination, or 24 hours of scheduled departure.\n"
+        "- Revocation SLA: SSO suspension within 2 hours of emergency termination, or 24 hours of scheduled departure.\n"
         "- Session Invalidation: Revocation logs must record token and active session invalidation.\n"
         "- Downstream Cleansing: Revoking GitHub memberships, AWS IAM access, and rotating team secrets."
     )
     pdf.multi_cell(0, 4.5, offboarding_policy, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "5. Offboarding Compliance Checklist & Access Revocation Matrix", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    
+    # Table Header
+    pdf.set_fill_color(30, 41, 59)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.cell(10, 5.5, "ID", border=1, fill=True)
+    pdf.cell(42, 5.5, "Action Item / Control", border=1, fill=True)
+    pdf.cell(26, 5.5, "Target System", border=1, fill=True)
+    pdf.cell(18, 5.5, "SOC 2 Criteria", border=1, fill=True)
+    pdf.cell(26, 5.5, "SLA Standard", border=1, fill=True)
+    pdf.cell(34, 5.5, "Evidence Captured", border=1, fill=True)
+    pdf.cell(18, 5.5, "Status", border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(33, 37, 41)
+    
+    offboarding_checklist = [
+        ("OFF-01", "Termination Ticket / Departure Set", "Zoho People", "CC6.1", "Immediate / Scheduled", "Ticket Timestamp", "MET"),
+        ("OFF-02", "Disable SSO User Status", "Zoho Identity", "CC6.3", "<2 hrs (Emerg), <24 hrs", "Identity Audit Log Entry", "MET"),
+        ("OFF-03", "Terminate Active Sessions", "Zoho Identity", "CC6.3", "Instant upon Disable", "Session Reset Log Entry", "MET"),
+        ("OFF-04", "Deprovision Downstream Keys", "AWS IAM / GitHub", "CC6.3", "Within 24 hours", "AWS CLI/GitHub API Audit", "MET"),
+        ("OFF-05", "Archive User Data & Evidence", "AWS S3 Vault", "C1.1, A1.1", "Within 30 days", "Archived Report PDF S3 Key", "MET"),
+    ]
+    
+    pdf.set_font("Helvetica", "", 7)
+    for i, row in enumerate(offboarding_checklist):
+        bg = (255, 255, 255) if i % 2 == 0 else (248, 250, 252)
+        pdf.set_fill_color(*bg)
+        pdf.cell(10, 5.5, row[0], border=1, fill=True)
+        pdf.cell(42, 5.5, row[1], border=1, fill=True)
+        pdf.cell(26, 5.5, row[2], border=1, fill=True)
+        pdf.cell(18, 5.5, row[3], border=1, fill=True)
+        pdf.cell(26, 5.5, row[4], border=1, fill=True)
+        pdf.cell(34, 5.5, row[5], border=1, fill=True)
+        pdf.set_text_color(22, 163, 74)
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.cell(18, 5.5, row[6], border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(33, 37, 41)
+        pdf.set_font("Helvetica", "", 7)
 
     # ── Section 13: Systems Architecture Diagram ──────────────────────────────────────────────
     pdf.add_page()
@@ -805,7 +936,13 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
         "                 |    SES / GitHub Issues Alerts Generated |\n"
         "                 +-----------------------------------------+\n"
     )
-    pdf.multi_cell(0, 4, diagram, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    img_path = Path(__file__).resolve().parent.parent / "docs/aws_architecture_diagram.png"
+    if img_path.exists():
+        pdf.ln(5)
+        pdf.image(str(img_path), x=18, y=pdf.get_y(), w=174)
+    else:
+        pdf.multi_cell(0, 4, diagram, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── Footer on each page ───────────────────────────────────────────────────
     # (fpdf doesn't support dynamic footers easily; add static footer)
