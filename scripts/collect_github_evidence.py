@@ -22,6 +22,10 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load local environment variables
+load_dotenv()
 
 
 def now_utc() -> str:
@@ -234,7 +238,7 @@ def collect_workflow_runs(client: GitHubAPIClient, repo: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Collect GitHub SOC 2 compliance evidence")
-    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="owner/repo")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="owner/repo (or comma-separated list)")
     parser.add_argument("--token", default=os.environ.get("GITHUB_TOKEN", os.environ.get("PROJECT_GITHUB_TOKEN", "")))
     parser.add_argument("--branch", default="main")
     parser.add_argument("--output", default="/tmp/github_evidence")
@@ -256,34 +260,69 @@ def main():
     all_results = []
     failures = []
 
-    print(f"[GitHub Evidence] Collecting compliance evidence for {args.repo}")
+    # Parse repositories
+    if "," in args.repo:
+        repos = [r.strip() for r in args.repo.split(",") if r.strip()]
+    else:
+        # Default to auditing all three repositories of interest if we are in this project
+        repos = [args.repo]
+        org = args.repo.split("/")[0] if "/" in args.repo else "Kavyvachhani"
+        for extra in ["SOC_Employ_magment_Portal", "automation_securtiy_pipline_soc"]:
+            full_extra = f"{org}/{extra}"
+            if full_extra not in repos and extra not in args.repo:
+                repos.append(full_extra)
 
-    # Branch protection
-    for r in collect_branch_protection(client, args.repo, args.branch):
-        all_results.append(r)
-        if r["status"] == "FAIL":
-            failures.append(r["control"])
+    print(f"[GitHub Evidence] Collecting compliance evidence for repositories: {repos}")
 
-    # Repo settings
-    for r in collect_repo_settings(client, args.repo):
-        all_results.append(r)
-        if r["status"] == "FAIL":
-            failures.append(r["control"])
+    for repo in repos:
+        print(f"  -> Auditing repository: {repo}")
+        # Branch protection
+        try:
+            for r in collect_branch_protection(client, repo, args.branch):
+                r["control"] = f"{r['control']} ({repo})"
+                all_results.append(r)
+                if r["status"] == "FAIL":
+                    failures.append(r["control"])
+        except Exception as e:
+            all_results.append(_warn("CC6.2", f"Branch Protection ({repo})", {"repo": repo, "error": str(e)}, f"Error: {e}"))
 
-    # Deployment environments
-    for r in collect_deployment_environments(client, args.repo):
-        all_results.append(r)
-        if r["status"] == "FAIL":
-            failures.append(r["control"])
+        # Repo settings
+        try:
+            for r in collect_repo_settings(client, repo):
+                r["control"] = f"{r['control']} ({repo})"
+                all_results.append(r)
+                if r["status"] == "FAIL":
+                    failures.append(r["control"])
+        except Exception as e:
+            all_results.append(_warn("CC6.1", f"Repository Settings ({repo})", {"repo": repo, "error": str(e)}, f"Error: {e}"))
 
-    # Secrets inventory
-    secrets_r = collect_actions_secrets(client, args.repo)
-    all_results.append(secrets_r)
-    if secrets_r["status"] == "FAIL":
-        failures.append(secrets_r["control"])
+        # Deployment environments
+        try:
+            for r in collect_deployment_environments(client, repo):
+                r["control"] = f"{r['control']} ({repo})"
+                all_results.append(r)
+                if r["status"] == "FAIL":
+                    failures.append(r["control"])
+        except Exception as e:
+            all_results.append(_warn("CC6.2", f"Deployment Environments ({repo})", {"repo": repo, "error": str(e)}, f"Error: {e}"))
 
-    # Workflow history
-    all_results.append(collect_workflow_runs(client, args.repo))
+        # Secrets inventory
+        try:
+            secrets_r = collect_actions_secrets(client, repo)
+            secrets_r["control"] = f"{secrets_r['control']} ({repo})"
+            all_results.append(secrets_r)
+            if secrets_r["status"] == "FAIL":
+                failures.append(secrets_r["control"])
+        except Exception as e:
+            all_results.append(_warn("CC6.3", f"Required GitHub Secrets Configured ({repo})", {"repo": repo, "error": str(e)}, f"Error: {e}"))
+
+        # Workflow history
+        try:
+            run_history = collect_workflow_runs(client, repo)
+            run_history["control"] = f"{run_history['control']} ({repo})"
+            all_results.append(run_history)
+        except Exception as e:
+            all_results.append(_warn("CC7.2", f"Workflow Execution History ({repo})", {"repo": repo, "error": str(e)}, f"Error: {e}"))
 
     # Write evidence
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -291,8 +330,7 @@ def main():
     manifest = {
         "collector": "collect_github_evidence.py",
         "collected_at": now_utc(),
-        "repository": args.repo,
-        "branch": args.branch,
+        "repositories": repos,
         "controls_checked": len(all_results),
         "pass_count": sum(1 for r in all_results if r["status"] == "PASS"),
         "fail_count": sum(1 for r in all_results if r["status"] == "FAIL"),

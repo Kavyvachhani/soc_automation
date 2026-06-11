@@ -107,6 +107,58 @@ def load_ai_pentest(scan_dir: str) -> dict:
         return {"findings": [], "summary": {}, "soc2_observations": [], "positive_findings": []}
 
 
+def load_shannon(scan_dir: str) -> dict:
+    fp = Path(scan_dir) / "shannon-results.json"
+    if not fp.exists():
+        return {"findings": []}
+    try:
+        return json.loads(fp.read_text())
+    except Exception:
+        return {"findings": []}
+
+
+def load_endpoints(scan_dir: str) -> dict:
+    fp = Path(scan_dir) / "endpoints_evidence_latest.json"
+    if not fp.exists():
+        files = sorted(Path(scan_dir).glob("endpoints_evidence_*.json"))
+        if files:
+            fp = files[-1]
+        else:
+            return {"results": []}
+    try:
+        return json.loads(fp.read_text())
+    except Exception:
+        return {"results": []}
+
+
+def load_github_evidence(scan_dir: str) -> dict:
+    fp = Path(scan_dir) / "github_evidence_latest.json"
+    if not fp.exists():
+        files = sorted(Path(scan_dir).glob("github_evidence_*.json"))
+        if files:
+            fp = files[-1]
+        else:
+            return {"results": []}
+    try:
+        return json.loads(fp.read_text())
+    except Exception:
+        return {"results": []}
+
+
+def load_aws_evidence(scan_dir: str) -> dict:
+    fp = Path(scan_dir) / "aws_evidence_latest.json"
+    if not fp.exists():
+        files = sorted(Path(scan_dir).glob("aws_evidence_*.json"))
+        if files:
+            fp = files[-1]
+        else:
+            return {"results": []}
+    try:
+        return json.loads(fp.read_text())
+    except Exception:
+        return {"results": []}
+
+
 # ─── Severity colour helpers ──────────────────────────────────────────────────
 
 SEV_COLORS = {
@@ -135,6 +187,10 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
     trivy_vuln   = load_trivy_vuln(scan_dir)
     trivy_secrets= load_trivy_secrets(scan_dir)
     ai_pentest   = load_ai_pentest(scan_dir)
+    shannon      = load_shannon(scan_dir)
+    endpoints    = load_endpoints(scan_dir)
+    github_ev    = load_github_evidence(scan_dir)
+    aws_ev       = load_aws_evidence(scan_dir)
 
     # Summarise
     bandit_results   = bandit.get("results", [])
@@ -158,8 +214,12 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
     ai_critical      = [f for f in ai_findings if f.get("severity") == "CRITICAL"]
     ai_high          = [f for f in ai_findings if f.get("severity") in ("CRITICAL", "HIGH")]
 
-    total_critical = len(bandit_critical) + len(semgrep_critical) + len(trivy_critical) + len(ai_critical) + len(secrets_found)
-    overall_status = "CRITICAL" if total_critical > 0 else ("HIGH" if (bandit_high or trivy_high or ai_high) else "PASS")
+    shannon_findings = shannon.get("findings", [])
+    shannon_critical = [f for f in shannon_findings if f.get("severity") == "CRITICAL"]
+    shannon_high     = [f for f in shannon_findings if f.get("severity") in ("CRITICAL", "HIGH")]
+
+    total_critical = len(bandit_critical) + len(semgrep_critical) + len(trivy_critical) + len(ai_critical) + len(secrets_found) + len(shannon_critical)
+    overall_status = "CRITICAL" if total_critical > 0 else ("HIGH" if (bandit_high or trivy_high or ai_high or shannon_high) else "PASS")
 
     now_str   = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     commit    = os.getenv("COMMIT_SHA", "N/A")[:12]
@@ -227,6 +287,10 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
         ("Dependency CVEs",          len(pip_vulns) + len(trivy_vulns), len(trivy_critical)),
         ("Secrets Detected",         len(secrets_found), len(secrets_found)),
         ("AI Pentest Findings",      len(ai_findings), len(ai_critical)),
+        ("Shannon AI Pentest",       len(shannon_findings), len(shannon_critical)),
+        ("Endpoints Security Audit", len(endpoints.get("results", [])), sum(1 for r in endpoints.get("results", []) if r.get("status") == "FAIL")),
+        ("GitHub Repos Audit",       len(github_ev.get("results", [])), sum(1 for r in github_ev.get("results", []) if r.get("status") == "FAIL")),
+        ("AWS Account Configuration",len(aws_ev.get("results", [])), sum(1 for r in aws_ev.get("results", []) if r.get("status") == "FAIL")),
     ]
 
     # Header
@@ -546,6 +610,202 @@ def generate_pdf(output_path: str, scan_dir: str) -> None:
         for item in items:
             pdf.cell(0, 5, _s(f"    - {item}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
+
+    # ── Section 8: Shannon AI Pentest Report ───────────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "8", "Shannon AI Endpoint Pentest Report")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, f"Target Endpoint: {shannon.get('target', 'N/A')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, f"Scan Agent: {shannon.get('agent', 'Shannon AI')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, f"Status: {shannon.get('status', 'N/A')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+
+    if not shannon_findings:
+        pdf.set_text_color(22, 163, 74)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 8, "  No critical neural pentesting findings detected.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(33, 37, 41)
+    else:
+        for f in shannon_findings:
+            sev = f.get("severity", "INFO")
+            pdf.set_fill_color(*_lighten(sev_color(sev)))
+            pdf.set_text_color(*sev_color(sev))
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(0, 7, f"  [{sev}] {f.get('endpoint', '')} — {f.get('vulnerability', '')}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(33, 37, 41)
+            pdf.set_fill_color(248, 250, 252)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.multi_cell(0, 5, f"    Description: {f.get('description', '')}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.multi_cell(0, 5, f"    PoC: {f.get('proof_of_concept', '')}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(22, 163, 74)
+            pdf.multi_cell(0, 5, f"    Remediation: {f.get('remediation', '')}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(33, 37, 41)
+            pdf.ln(2)
+
+    # ── Section 9: Endpoint Health & Security Audit ─────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "9", "Active Endpoints Health & Security Audit")
+    endpoints_results = endpoints.get("results", [])
+    if not endpoints_results:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 6, "  No active endpoints scanned or data missing.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    else:
+        _table_header(pdf, ["Endpoint / Target", "SSL Secured", "Status Code", "Compliance State"])
+        for i, r in enumerate(endpoints_results):
+            ev = r.get("evidence", {})
+            status = r.get("status", "UNKNOWN")
+            s_color = sev_color("PASS") if status == "PASS" else (sev_color("HIGH") if status == "FAIL" else sev_color("MEDIUM"))
+            bg = (255, 255, 255) if i % 2 == 0 else (248, 250, 252)
+            pdf.set_fill_color(*bg)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(43, 6, _s(ev.get("name", ""), 25), fill=True)
+            pdf.cell(43, 6, "YES (Valid)" if ev.get("ssl_valid") else ("NO" if not ev.get("ssl_secured") else "SSL Error"), fill=True)
+            pdf.cell(43, 6, str(ev.get("status_code", "Down")), fill=True)
+            pdf.set_text_color(*s_color)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(0, 6, status, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_text_color(33, 37, 41)
+
+            if ev.get("missing_headers"):
+                pdf.set_font("Helvetica", "I", 7.5)
+                pdf.set_text_color(200, 100, 0)
+                pdf.cell(0, 5, f"      -> Security Gaps: Missing HTTP headers: {', '.join(ev.get('missing_headers'))}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_text_color(33, 37, 41)
+
+    # ── Section 10: Multi-Repository GitHub Controls Audit ─────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "10", "Multi-Repository GitHub Controls Audit")
+    github_results = github_ev.get("results", [])
+    if not github_results:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 6, "  GitHub evidence not scanned or data missing.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    else:
+        _table_header(pdf, ["Control Criteria", "Repository Target", "Status", "Detailed Evidence"])
+        for i, r in enumerate(github_results[:35]):
+            status = r.get("status", "UNKNOWN")
+            s_color = sev_color("PASS") if status == "PASS" else (sev_color("HIGH") if status == "FAIL" else sev_color("MEDIUM"))
+            bg = (255, 255, 255) if i % 2 == 0 else (248, 250, 252)
+            pdf.set_fill_color(*bg)
+            pdf.set_font("Helvetica", "", 7.5)
+            # Extracted control name & repo target
+            raw_ctrl = r.get("control", "")
+            ctrl_name = raw_ctrl.split(" (")[0] if " (" in raw_ctrl else raw_ctrl
+            repo_name = raw_ctrl.split(" (")[1].replace(")", "") if " (" in raw_ctrl else "soc_automation"
+            pdf.cell(43, 6, _s(ctrl_name, 25), fill=True)
+            pdf.cell(43, 6, _s(repo_name.split("/")[-1], 25), fill=True)
+            pdf.set_text_color(*s_color)
+            pdf.set_font("Helvetica", "B", 7.5)
+            pdf.cell(30, 6, status, fill=True)
+            pdf.set_text_color(33, 37, 41)
+            pdf.set_font("Helvetica", "", 7.5)
+            
+            # Extract detailed reason or evidence attributes
+            ev_summary = r.get("reason", "")
+            if not ev_summary and "evidence" in r:
+                ev_summary = str(r["evidence"])
+            pdf.cell(0, 6, _s(ev_summary, 35), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ── Section 11: Enterprise AWS Configuration Controls Audit ─────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "11", "Enterprise AWS Infrastructure Controls Audit")
+    aws_results = aws_ev.get("results", [])
+    if not aws_results:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 6, "  AWS account evidence not scanned or data missing.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    else:
+        _table_header(pdf, ["SOC 2 ID", "Resource / Control Target", "Status", "Auditor Observations"])
+        for i, r in enumerate(aws_results[:35]):
+            status = r.get("status", "UNKNOWN")
+            s_color = sev_color("PASS") if status == "PASS" else (sev_color("HIGH") if status == "FAIL" else sev_color("MEDIUM"))
+            bg = (255, 255, 255) if i % 2 == 0 else (248, 250, 252)
+            pdf.set_fill_color(*bg)
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.cell(20, 6, _s(r.get("control_id", "CC6.1")), fill=True)
+            pdf.cell(60, 6, _s(r.get("control", ""), 35), fill=True)
+            pdf.set_text_color(*s_color)
+            pdf.set_font("Helvetica", "B", 7.5)
+            pdf.cell(25, 6, status, fill=True)
+            pdf.set_text_color(33, 37, 41)
+            pdf.set_font("Helvetica", "", 7.5)
+            
+            reason = r.get("reason", "")
+            if not reason and "evidence" in r:
+                reason = "Verified: " + str(r["evidence"]).replace("{","").replace("}","")[:40]
+            pdf.cell(0, 6, _s(reason, 40), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ── Section 12: Non-Technical Controls - Zoho Lifecycle ──────────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "12", "Onboarding & Offboarding Identity Access Lifecycle Policies")
+    
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "1. Governance & Control Objective (SOC 2 CC6.1, CC6.2)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.multi_cell(0, 4.5, "To ensure access to our systems is authorized by hiring managers and HR, granted according to the Principle of Least Privilege (PoLP) using single identity mapping, and suspended immediately when employment is terminated.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "2. Zoho People Onboarding Access Control Process (SOC 2 CC6.2)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    onboarding_policy = (
+        "- HR Profile Creation: Newly hired employees are created in Zoho People on offer signature.\n"
+        "- Background Screening Check: Run automatically via background screening integrations.\n"
+        "- Policy Acknowledgement Gate: Employee signs NDAs, Acceptable Use, and Handbooks.\n"
+        "- Zoho Identity (SSO) Account: Set up with forced 14-char passwords, account lockouts, and mandatory MFA."
+    )
+    pdf.multi_cell(0, 4.5, onboarding_policy, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "3. Zoho People Offboarding Access Revocation Process (SOC 2 CC6.3)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9)
+    offboarding_policy = (
+        "- Revocation SLA: Suspension of SSO and local credentials within 2 hours of emergency termination, or 24 hours of scheduled departure.\n"
+        "- Session Invalidation: Revocation logs must record token and active session invalidation.\n"
+        "- Downstream Cleansing: Revoking GitHub memberships, AWS IAM access, and rotating team secrets."
+    )
+    pdf.multi_cell(0, 4.5, offboarding_policy, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # ── Section 13: Systems Architecture Diagram ──────────────────────────────────────────────
+    pdf.add_page()
+    _section_header(pdf, "13", "Systems Architecture & DevSecOps Flow Diagram")
+    pdf.set_font("Courier", "", 8.5)
+    
+    diagram = (
+        "                 +-----------------------------------------+\n"
+        "                 |       Developer Push / PR Trigger       |\n"
+        "                 +-----------------------------------------+\n"
+        "                                      |\n"
+        "                                      v\n"
+        "                 +-----------------------------------------+\n"
+        "                 |          GitHub Actions Runner          |\n"
+        "                 +-----------------------------------------+\n"
+        "                  /         |                     |       \\\n"
+        "                 /          |                     |        \\\n"
+        "    +--------------+  +--------------+  +--------------+  +--------------+\n"
+        "    |    SAST      |  |    SCA &     |  |    Secret    |  |  Compliance  |\n"
+        "    |  (Semgrep/   |  | Dependencies |  |   Scanning   |  |    Engine    |\n"
+        "    |   Bandit)    |  |(Trivy/Grype) |  |(Gitleaks/TH) |  | (AWS/GitHub) |\n"
+        "    +--------------+  +--------------+  +--------------+  +--------------+\n"
+        "                 \\          |                     |        /\n"
+        "                  \\         |                     |       /\n"
+        "                   v        v                     v      v\n"
+        "                 +-----------------------------------------+\n"
+        "                 |      Live DAST & AI Pentest Checks      |\n"
+        "                 |      (ZAP, Nuclei, Shannon AI)          |\n"
+        "                 +-----------------------------------------+\n"
+        "                                      |\n"
+        "                                      v\n"
+        "                 +-----------------------------------------+\n"
+        "                 |         S3 Compliance Vault             |\n"
+        "                 |  s3://attest-vault-669167971016/reports |\n"
+        "                 +-----------------------------------------+\n"
+        "                                      |\n"
+        "                                      v\n"
+        "                 +-----------------------------------------+\n"
+        "                 |    SES / GitHub Issues Alerts Generated |\n"
+        "                 +-----------------------------------------+\n"
+    )
+    pdf.multi_cell(0, 4, diagram, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── Footer on each page ───────────────────────────────────────────────────
     # (fpdf doesn't support dynamic footers easily; add static footer)

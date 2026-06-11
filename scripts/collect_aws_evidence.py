@@ -23,6 +23,10 @@ import json
 import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load local environment variables
+load_dotenv()
 
 
 def now_utc() -> str:
@@ -76,57 +80,69 @@ def collect_cloudtrail(session) -> dict:
         return _warn("CC6.1", "CloudTrail Enabled", {"error": str(e)}, f"Could not query CloudTrail: {e}")
 
 
-def collect_s3_evidence(session, bucket_name: str) -> list[dict]:
-    """CC6.2 / C1.1 — S3 encryption, versioning, and public access block."""
+def collect_s3_evidence(session, target_bucket: str = "") -> list[dict]:
+    """CC6.2 / C1.1 — S3 encryption, versioning, and public access block for all buckets in the account."""
     s3 = session.client("s3")
     results = []
 
-    # Encryption
     try:
-        enc = s3.get_bucket_encryption(Bucket=bucket_name)
-        rules = enc.get("ServerSideEncryptionConfiguration", {}).get("Rules", [])
-        algo = rules[0].get("ApplyServerSideEncryptionByDefault", {}).get("SSEAlgorithm", "none") if rules else "none"
-        results.append(_pass("C1.1", "S3 Encryption Enabled", {
-            "bucket": bucket_name,
-            "sse_algorithm": algo,
-            "rules": rules,
-        }))
+        buckets_data = s3.list_buckets()
+        buckets = buckets_data.get("Buckets", [])
     except Exception as e:
-        results.append(_fail("C1.1", "S3 Encryption Enabled",
-                             {"bucket": bucket_name, "error": str(e)},
-                             "S3 encryption NOT configured"))
+        return [_warn("C1.1", "S3 Buckets Inventory", {"error": str(e)}, f"Could not list S3 buckets: {e}")]
 
-    # Versioning
-    try:
-        ver = s3.get_bucket_versioning(Bucket=bucket_name)
-        status = ver.get("Status", "Disabled")
-        if status == "Enabled":
-            results.append(_pass("A1.1", "S3 Versioning Enabled", {"bucket": bucket_name, "status": status}))
-        else:
-            results.append(_fail("A1.1", "S3 Versioning Enabled",
-                                 {"bucket": bucket_name, "status": status},
-                                 f"S3 versioning is {status}"))
-    except Exception as e:
-        results.append(_warn("A1.1", "S3 Versioning Enabled", {"error": str(e)}, str(e)))
+    # Make sure target_bucket is in the list or we check it at least
+    bucket_names = [b["Name"] for b in buckets]
+    if target_bucket and target_bucket not in bucket_names:
+        bucket_names.append(target_bucket)
 
-    # Public access block
-    try:
-        pub = s3.get_public_access_block(Bucket=bucket_name)
-        cfg = pub.get("PublicAccessBlockConfiguration", {})
-        all_blocked = all([
-            cfg.get("BlockPublicAcls", False),
-            cfg.get("IgnorePublicAcls", False),
-            cfg.get("BlockPublicPolicy", False),
-            cfg.get("RestrictPublicBuckets", False),
-        ])
-        if all_blocked:
-            results.append(_pass("C1.1", "S3 Public Access Blocked", {"bucket": bucket_name, "config": cfg}))
-        else:
-            results.append(_fail("C1.1", "S3 Public Access Blocked",
-                                 {"bucket": bucket_name, "config": cfg},
-                                 "Public access not fully blocked"))
-    except Exception as e:
-        results.append(_warn("C1.1", "S3 Public Access Blocked", {"error": str(e)}, str(e)))
+    for name in bucket_names:
+        # Encryption check
+        try:
+            enc = s3.get_bucket_encryption(Bucket=name)
+            rules = enc.get("ServerSideEncryptionConfiguration", {}).get("Rules", [])
+            algo = rules[0].get("ApplyServerSideEncryptionByDefault", {}).get("SSEAlgorithm", "none") if rules else "none"
+            results.append(_pass("C1.1", f"S3 Encryption - {name}", {
+                "bucket": name,
+                "sse_algorithm": algo,
+                "rules": rules,
+            }))
+        except Exception as e:
+            results.append(_fail("C1.1", f"S3 Encryption - {name}",
+                                 {"bucket": name, "error": str(e)},
+                                 f"S3 encryption NOT configured on bucket: {name}"))
+
+        # Versioning check
+        try:
+            ver = s3.get_bucket_versioning(Bucket=name)
+            status = ver.get("Status", "Disabled")
+            if status == "Enabled":
+                results.append(_pass("A1.1", f"S3 Versioning - {name}", {"bucket": name, "status": status}))
+            else:
+                results.append(_fail("A1.1", f"S3 Versioning - {name}",
+                                     {"bucket": name, "status": status},
+                                     f"S3 versioning is {status} on bucket: {name}"))
+        except Exception as e:
+            results.append(_warn("A1.1", f"S3 Versioning - {name}", {"error": str(e)}, str(e)))
+
+        # Public access block check
+        try:
+            pub = s3.get_public_access_block(Bucket=name)
+            cfg = pub.get("PublicAccessBlockConfiguration", {})
+            all_blocked = all([
+                cfg.get("BlockPublicAcls", False),
+                cfg.get("IgnorePublicAcls", False),
+                cfg.get("BlockPublicPolicy", False),
+                cfg.get("RestrictPublicBuckets", False),
+            ])
+            if all_blocked:
+                results.append(_pass("C1.1", f"S3 Public Access Blocked - {name}", {"bucket": name, "config": cfg}))
+            else:
+                results.append(_fail("C1.1", f"S3 Public Access Blocked - {name}",
+                                     {"bucket": name, "config": cfg},
+                                     f"Public access not fully blocked on bucket: {name}"))
+        except Exception as e:
+            results.append(_warn("C1.1", f"S3 Public Access Blocked - {name}", {"error": str(e)}, str(e)))
 
     return results
 

@@ -52,6 +52,28 @@ jobs:
         env:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
 
+      - name: Collect GitHub Evidence (Branch Protection, PR Rules, Visibility)
+        run: |
+          python scripts/collect_github_evidence.py \
+            --repo "${{ secrets.PROJECT_GITHUB_ORG }}/${{ secrets.GITHUB_REPO }}" \
+            --token "${{ secrets.PROJECT_GITHUB_TOKEN }}" \
+            --output /tmp/evidence \
+            --bucket "${{ secrets.S3_BUCKET }}" \
+            --upload
+
+      - name: Collect Endpoints Evidence (SSL, Availability, Headers)
+        run: |
+          python scripts/collect_endpoints_evidence.py \
+            --output /tmp/evidence \
+            --bucket "${{ secrets.S3_BUCKET }}" \
+            --upload
+
+      - name: Run Shannon AI Pentester
+        run: |
+          python scripts/shannon_ai_pentester.py \
+            --target "${{ secrets.PORTAL_API_URL || 'https://a5otw1fo40.execute-api.us-east-1.amazonaws.com' }}" \
+            --output /tmp/evidence/shannon-results.json
+
       - name: Run Compliance Engine
         run: |
           python scripts/compliance_engine.py \
@@ -382,7 +404,7 @@ jobs:
   report:
     name: "Generate PDF Report + S3 + Alert"
     runs-on: ubuntu-latest
-    needs: [sast, dependencies, secrets-scan]
+    needs: [sast, dependencies, secrets-scan, ai-pentest, collect-technical-evidence]
     if: always()
 
     steps:
