@@ -1,9 +1,9 @@
 name: attest-technical-auditor
 
-# Triggers for SOC 2 evidence collection
+# Triggers for SOC 2 technical evidence collection
 on:
   schedule:
-    - cron: "0 0 * * *"   # Every night at 00:00 UTC
+    - cron: "0 0 * * *"   # Every night at 00:00 UTC (daily)
   workflow_dispatch:
   push:
     branches: [main]
@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  collect-evidence:
-    name: Collect SOC 2 Evidence Snapshots
+  collect-technical-evidence:
+    name: Collect SOC 2 Technical Evidence
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +30,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install boto3 fpdf2
+          pip install boto3 fpdf2 requests
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -42,7 +42,7 @@ jobs:
       - name: Create Evidence Directory
         run: mkdir -p /tmp/evidence /tmp/reports
 
-      - name: Collect AWS Evidence
+      - name: Collect AWS Evidence (CloudTrail, IAM, S3, Security Groups)
         run: |
           python scripts/collect_aws_evidence.py \
             --bucket "${{ secrets.S3_BUCKET }}" \
@@ -51,28 +51,6 @@ jobs:
             --upload
         env:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
-          
-      - name: Collect GitHub Evidence
-        run: |
-          python scripts/collect_github_evidence.py \
-            --repo "${{ github.repository }}" \
-            --branch "main" \
-            --output /tmp/evidence \
-            --bucket "${{ secrets.S3_BUCKET }}" \
-            --upload
-        env:
-          GITHUB_TOKEN: ${{ secrets.PROJECT_GITHUB_TOKEN }}
-          
-
-
-      - name: Run Shannon AI Pentest
-        run: |
-          python scripts/ai_pentest.py \
-            --scan-dirs scripts/ \
-            --output /tmp/evidence/ai_evidence_latest.json
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          
 
       - name: Run Compliance Engine
         run: |
@@ -84,20 +62,18 @@ jobs:
         env:
           DEMO_MODE: "true"
 
-      - name: Generate Compliance PDF
-        if: always()
+      - name: Generate Final SOC 2 Compliance PDF
         run: |
           python scripts/generate_compliance_pdf.py \
             --summary /tmp/reports/compliance_summary_latest.json \
             --output /tmp/reports/soc2_compliance_report.pdf \
             --bucket "${{ secrets.S3_BUCKET }}" \
             --upload
-            
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: soc2-compliance-evidence
+          name: technical-evidence-${{ github.run_id }}
           path: |
             /tmp/evidence/
             /tmp/reports/

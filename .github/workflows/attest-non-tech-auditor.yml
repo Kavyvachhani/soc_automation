@@ -42,9 +42,7 @@ jobs:
       - name: Create Evidence Directory
         run: mkdir -p /tmp/evidence /tmp/reports
 
-
-          
-      - name: Collect Zoho HR Evidence
+      - name: Collect Zoho HR Evidence (NDAs, Training, Background Checks)
         run: |
           python scripts/collect_zoho_evidence.py \
             --output /tmp/evidence \
@@ -54,9 +52,6 @@ jobs:
           ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
           ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
           ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
-
-
-          
 
       - name: Run Compliance Engine
         run: |
@@ -68,20 +63,18 @@ jobs:
         env:
           DEMO_MODE: "true"
 
-      - name: Generate Compliance PDF
-        if: always()
+      - name: Generate Final SOC 2 Compliance PDF
         run: |
           python scripts/generate_compliance_pdf.py \
             --summary /tmp/reports/compliance_summary_latest.json \
             --output /tmp/reports/soc2_compliance_report.pdf \
             --bucket "${{ secrets.S3_BUCKET }}" \
             --upload
-            
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: soc2-compliance-evidence
+          name: non-tech-evidence-${{ github.run_id }}
           path: |
             /tmp/evidence/
             /tmp/reports/
