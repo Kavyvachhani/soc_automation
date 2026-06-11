@@ -6,19 +6,40 @@ Requires AWS credentials in environment.
 """
 import boto3
 import json
+import os
 import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load local environment variables
+dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=dotenv_path)
 
 REGION = "us-east-1"
-BUCKET = "attest-vault-669167971016"
+BUCKET = os.getenv("S3_BUCKET", "attest-vault-669167971016")
 APPROVAL_API_URL = "https://auq93txerd.execute-api.us-east-1.amazonaws.com"
-GITHUB_ORG = "Kavyvachhani"
-GITHUB_REPO = "soc_automation"
+GITHUB_ORG = os.getenv("PROJECT_GITHUB_ORG", "Kavyvachhani")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "soc_automation")
 
-# Read GitHub token from stdin or arg
-if len(sys.argv) >= 2:
-    github_token = sys.argv[1]
-else:
-    github_token = input("Enter PROJECT_GITHUB_TOKEN (PAT): ").strip()
+# Read GitHub token from env or stdin
+github_token = os.getenv("PROJECT_GITHUB_TOKEN", "")
+if not github_token:
+    if len(sys.argv) >= 2:
+        github_token = sys.argv[1]
+    else:
+        github_token = input("Enter PROJECT_GITHUB_TOKEN (PAT): ").strip()
+
+zoho_id = os.getenv("ZOHO_CLIENT_ID", "")
+zoho_secret = os.getenv("ZOHO_CLIENT_SECRET", "")
+zoho_refresh = os.getenv("ZOHO_REFRESH_TOKEN", "")
+zoho_domain = os.getenv("ZOHO_DOMAIN", "in")
+
+zoho_env = {
+    "ZOHO_CLIENT_ID": zoho_id,
+    "ZOHO_CLIENT_SECRET": zoho_secret,
+    "ZOHO_REFRESH_TOKEN": zoho_refresh,
+    "ZOHO_DOMAIN": zoho_domain,
+}
 
 client = boto3.client("lambda", region_name=REGION)
 
@@ -28,6 +49,7 @@ functions = {
         "GITHUB_REPO": GITHUB_REPO,
         "PROJECT_GITHUB_TOKEN": github_token,
         "PROJECT_GITHUB_ORG": GITHUB_ORG,
+        **zoho_env,
     },
     "attest-signed-processor": {
         "S3_BUCKET": BUCKET,
@@ -38,6 +60,7 @@ functions = {
         "GITHUB_REPO": GITHUB_REPO,
         "PROJECT_GITHUB_TOKEN": github_token,
         "PROJECT_GITHUB_ORG": GITHUB_ORG,
+        **zoho_env,
     },
     "attest-approval-handler": {
         "S3_BUCKET": BUCKET,
@@ -51,6 +74,14 @@ functions = {
         "GITHUB_REPO": GITHUB_REPO,
         "PROJECT_GITHUB_TOKEN": github_token,
         "PROJECT_GITHUB_ORG": GITHUB_ORG,
+        **zoho_env,
+    },
+    "attest-portal-api": {
+        "S3_BUCKET": BUCKET,
+        "GITHUB_REPO": GITHUB_REPO,
+        "PROJECT_GITHUB_TOKEN": github_token,
+        "PROJECT_GITHUB_ORG": GITHUB_ORG,
+        **zoho_env,
     },
 }
 
