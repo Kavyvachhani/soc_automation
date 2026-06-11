@@ -21,10 +21,11 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 def now_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()

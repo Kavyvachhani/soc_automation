@@ -7,10 +7,12 @@ import os
 import sys
 import base64
 import requests
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from nacl import encoding, public
-
-load_dotenv()
 
 # Configuration
 GITHUB_TOKEN = os.getenv("PROJECT_GITHUB_TOKEN")

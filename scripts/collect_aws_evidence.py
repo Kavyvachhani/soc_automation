@@ -23,10 +23,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Load local environment variables
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def now_utc() -> str:

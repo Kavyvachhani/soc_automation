@@ -21,10 +21,11 @@ import random
 import sys
 from pathlib import Path
 import requests
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 def now_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()

@@ -9,11 +9,13 @@ import json
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Load local environment variables
-dotenv_path = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(dotenv_path=dotenv_path)
+try:
+    from dotenv import load_dotenv
+    # Load local environment variables
+    dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(dotenv_path=dotenv_path)
+except ImportError:
+    pass
 
 REGION = "us-east-1"
 BUCKET = os.getenv("S3_BUCKET", "attest-vault-669167971016")

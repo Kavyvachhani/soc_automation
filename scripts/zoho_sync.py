@@ -19,8 +19,11 @@ from pathlib import Path
 import requests
 import boto3
 
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Configuration
 S3_BUCKET = os.getenv("S3_BUCKET", "attest-vault-669167971016")

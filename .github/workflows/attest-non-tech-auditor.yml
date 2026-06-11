@@ -42,16 +42,9 @@ jobs:
       - name: Create Evidence Directory
         run: mkdir -p /tmp/evidence /tmp/reports
 
-      - name: Collect Zoho HR Evidence (NDAs, Training, Background Checks)
+      - name: Collect Zoho HR Evidence (NDAs, Training, Background Checks) - SKIPPED
         run: |
-          python scripts/collect_zoho_evidence.py \
-            --output /tmp/evidence \
-            --bucket "${{ secrets.S3_BUCKET }}" \
-            --upload
-        env:
-          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
-          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
-          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
+          echo "Skipping Zoho HR evidence collection as requested by the user."
 
       - name: Run Compliance Engine
         run: |
